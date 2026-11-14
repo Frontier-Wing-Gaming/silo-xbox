@@ -14,10 +14,17 @@ namespace Silolux
 {
     sealed partial class App : Application
     {
+        static App()
+        {
+            // Catches failures before the XAML UnhandledException hook exists (e.g. in App.xaml).
+            AppDomain.CurrentDomain.UnhandledException += (s, e) =>
+                LogCrash(e.ExceptionObject as Exception, "AppDomain unhandled: " + e.ExceptionObject);
+        }
+
         public App()
         {
             InitializeComponent();
-            Ui.ApplyResources(Resources);
+            UnhandledException += (s, e) => LogCrash(e.Exception, e.Message);
             FocusVisualKind = FocusVisualKind.Reveal;
             Suspending += OnSuspending;
         }
@@ -115,6 +122,18 @@ namespace Silolux
         {
             var props = e.CurrentPoint.Properties;
             if (props.IsXButton1Pressed) e.Handled = TryGoBack();
+        }
+
+        /// <summary>Appends an unhandled exception to LocalState\crash.log (readable on Xbox via Device Portal).</summary>
+        static void LogCrash(Exception ex, string message)
+        {
+            try
+            {
+                var path = System.IO.Path.Combine(Windows.Storage.ApplicationData.Current.LocalFolder.Path, "crash.log");
+                System.IO.File.AppendAllText(path, DateTimeOffset.Now.ToString("u") + " " + message + Environment.NewLine + ex + Environment.NewLine + Environment.NewLine);
+            }
+            catch (Exception) { }
+            System.Diagnostics.Debug.WriteLine("Unhandled: " + message + Environment.NewLine + ex);
         }
 
         void OnSuspending(object sender, SuspendingEventArgs e)

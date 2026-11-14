@@ -3,6 +3,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:m="using:Silolux.Models"
+    xmlns:services="using:Silolux.Services"
     Background="{StaticResource SiloBackgroundBrush}">
     <Page.Resources>
         <DataTemplate x:Key="CardTemplate" x:DataType="m:Card">
@@ -15,8 +16,8 @@
                                  Foreground="{StaticResource SiloAccentBrush}" Background="#66000000"
                                  Visibility="{x:Bind ProgressVisibility}" />
                 </Grid>
-                <TextBlock Text="{x:Bind Title}" FontSize="{StaticResource CardTitleFontSize}" Margin="2,6,0,0" TextTrimming="CharacterEllipsis" />
-                <TextBlock Text="{x:Bind Subtitle}" FontSize="{StaticResource CardSubtitleFontSize}" Foreground="{StaticResource SiloMutedBrush}"
+                <TextBlock Text="{x:Bind Title}" FontSize="{x:Bind services:Ui.CardTitleFontSize}" Margin="2,6,0,0" TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{x:Bind Subtitle}" FontSize="{x:Bind services:Ui.CardSubtitleFontSize}" Foreground="{StaticResource SiloMutedBrush}"
                            Margin="2,0,0,0" TextTrimming="CharacterEllipsis" />
             </StackPanel>
         </DataTemplate>
@@ -27,8 +28,8 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
-        <Grid Padding="{StaticResource HomeHeaderPadding}">
-            <TextBlock Text="Silolux" FontSize="{StaticResource HomeTitleFontSize}" FontWeight="SemiBold" VerticalAlignment="Center" />
+        <Grid Padding="{x:Bind services:Ui.HomeHeaderPadding}">
+            <TextBlock Text="Silolux" FontSize="{x:Bind services:Ui.HomeTitleFontSize}" FontWeight="SemiBold" VerticalAlignment="Center" />
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                 <Button x:Name="RefreshButton" Click="Refresh_Click" Margin="0,0,12,0" ToolTipService.ToolTip="Refresh">
                     <SymbolIcon Symbol="Refresh" />
@@ -37,13 +38,13 @@
             </StackPanel>
         </Grid>
 
-        <ScrollViewer Grid.Row="1" x:Name="Scroller" VerticalScrollBarVisibility="Hidden" Padding="{StaticResource HomeRowsPadding}">
+        <ScrollViewer Grid.Row="1" x:Name="Scroller" VerticalScrollBarVisibility="Hidden" Padding="{x:Bind services:Ui.HomeRowsPadding}">
             <StackPanel>
                 <ItemsControl x:Name="Sections" IsTabStop="False">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="m:Section">
                             <StackPanel>
-                                <TextBlock Text="{x:Bind Title}" Style="{StaticResource RowTitle}" FontSize="{StaticResource RowTitleFontSize}" />
+                                <TextBlock Text="{x:Bind Title}" Style="{StaticResource RowTitle}" FontSize="{x:Bind services:Ui.RowTitleFontSize}" />
                                 <ListView ItemsSource="{x:Bind Cards}" SelectionMode="None" IsItemClickEnabled="True"
                                           ItemClick="Card_ItemClick" ScrollViewer.HorizontalScrollMode="Enabled"
                                           ScrollViewer.HorizontalScrollBarVisibility="Hidden"
@@ -57,7 +58,7 @@
                                     <ListView.ItemContainerStyle>
                                         <Style TargetType="ListViewItem">
                                             <Setter Property="Padding" Value="0" />
-                                            <Setter Property="Margin" Value="{StaticResource CardSpacing}" />
+                                            <Setter Property="Margin" Value="0,0,12,0" />
                                         </Style>
                                     </ListView.ItemContainerStyle>
                                 </ListView>
