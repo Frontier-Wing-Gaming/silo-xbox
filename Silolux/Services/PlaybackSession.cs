@@ -14,6 +14,75 @@ namespace Silolux.Services
         public Uri Url;
     }
 
+    /// <summary>
+    /// LocalState\playback-log.txt: each playback start, progress report and stop with the server's
+    /// answer, newest last. Failed reports are otherwise silent, and a server that drops them
+    /// leaves the resume point where it was.
+    /// </summary>
+    public static class PlaybackLog
+    {
+        static readonly System.Threading.SemaphoreSlim Gate = new System.Threading.SemaphoreSlim(1, 1);
+
+        public static string Secs(double seconds) =>
+            TimeSpan.FromSeconds(Math.Max(0, seconds)).ToString(@"h\:mm\:ss", System.Globalization.CultureInfo.InvariantCulture) +
+            string.Format(System.Globalization.CultureInfo.InvariantCulture, " ({0:0.#} s)", seconds);
+
+        static readonly System.Text.RegularExpressions.Regex Timing = new System.Text.RegularExpressions.Regex(
+            @"((?:\d+:)?\d{1,2}:\d{2}[.,]\d{1,3})\s*-->\s*((?:\d+:)?\d{1,2}:\d{2}[.,]\d{1,3})");
+
+        /// <summary>A fetched subtitle file in one line: its URL without credentials, cue count, first and last cues.</summary>
+        public static string Describe(Uri url, string text)
+        {
+            var query = string.Join("&", (url.Query ?? "").TrimStart('?').Split('&')
+                .Where(p => p.Length > 0 && !p.StartsWith("token=") && !p.StartsWith("st="))
+                .Select(p => p.Length > 60 ? p.Substring(0, 60) + "…" : p));
+            var cues = Timing.Matches(text);
+            var line = url.AbsolutePath + (query.Length > 0 ? "?" + query : "") + " · " + text.Length + " chars, " + cues.Count + " cues";
+            if (cues.Count == 0) return line + " · starts: " + Snippet(text, 0);
+            var first = cues[0];
+            var last = cues[cues.Count - 1];
+            return line + " · first " + first.Groups[1].Value + " \"" + Snippet(text, first.Index + first.Length) + "\"" +
+                   " · last " + last.Groups[1].Value + " \"" + Snippet(text, last.Index + last.Length) + "\"";
+        }
+
+        static string Snippet(string text, int from)
+        {
+            var s = text.Substring(Math.Min(from, text.Length)).TrimStart();
+            var end = s.IndexOfAny(new[] { '\r', '\n' });
+            if (end >= 0) s = s.Substring(0, end);
+            return s.Length > 60 ? s.Substring(0, 60) + "…" : s;
+        }
+
+        public static string Outcome(JsonObject answer)
+        {
+            if (answer == null) return "ok";
+            var outcome = answer.Str("outcome") ?? "ok";
+            var accepted = answer.Obj("accepted");
+            return outcome + (accepted != null ? ", saved " + Secs(accepted.Num("position")) : "");
+        }
+
+        public static async void Write(string line)
+        {
+            await Gate.WaitAsync();
+            try
+            {
+                var folder = Windows.Storage.ApplicationData.Current.LocalFolder;
+                var file = await folder.CreateFileAsync("playback-log.txt", Windows.Storage.CreationCollisionOption.OpenIfExists);
+                var props = await file.GetBasicPropertiesAsync();
+                if (props.Size > 64 * 1024)
+                {
+                    // Keep the newer half.
+                    var old = await Windows.Storage.FileIO.ReadTextAsync(file);
+                    await Windows.Storage.FileIO.WriteTextAsync(file, old.Substring(old.Length / 2));
+                }
+                await Windows.Storage.FileIO.AppendTextAsync(file,
+                    DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture) + "  " + line + Environment.NewLine);
+            }
+            catch (Exception) { }
+            finally { Gate.Release(); }
+        }
+    }
+
     public class QualityOption
     {
         public string Label;
@@ -60,6 +129,54 @@ namespace Silolux.Services
         public double SourceDuration => Plan.Path("source")?.Num("duration_seconds") ?? 0;
         public double SourcePosition(double playerSeconds) => Math.Max(0, playerSeconds + Offset);
         public double PlayerPosition(double sourceSeconds) => Math.Max(0, sourceSeconds - Offset);
+        /// <summary>Film time at the player's 0: non-zero for a stream the server started mid-film.</summary>
+        public double TimelineOffset => Offset;
+
+        static readonly System.Text.RegularExpressions.Regex CueTime = new System.Text.RegularExpressions.Regex(
+            @"(?:(\d+):)?(\d{1,2}):(\d{2})([.,])(\d{1,3})");
+
+        /// <summary>
+        /// A WebVTT or SubRip track moved <paramref name="seconds"/> earlier: subtitle files are timed
+        /// from the film's start, but a stream the server started mid-film puts the player's 0 at its
+        /// origin, so unshifted lines arrive that much late. Cues that end before 0 are dropped.
+        /// </summary>
+        public static string ShiftCues(string text, double seconds)
+        {
+            var blocks = System.Text.RegularExpressions.Regex.Split(text.Replace("\r\n", "\n").Replace('\r', '\n'), @"\n{2,}");
+            var kept = new List<string>();
+            foreach (var block in blocks)
+            {
+                var lines = block.Split('\n');
+                var at = Array.FindIndex(lines, l => l.Contains("-->"));
+                if (at < 0) { kept.Add(block); continue; }
+                var times = CueTime.Matches(lines[at]);
+                if (times.Count < 2) { kept.Add(block); continue; }
+                var start = Seconds(times[0]) - seconds;
+                var end = Seconds(times[1]) - seconds;
+                if (end <= 0) continue;
+                var sep = times[0].Groups[4].Value;
+                // Rebuild the timing line, keeping any WebVTT cue settings after the end time.
+                var rest = lines[at].Substring(times[1].Index + times[1].Length);
+                lines[at] = Stamp(Math.Max(0, start), sep) + " --> " + Stamp(end, sep) + rest;
+                kept.Add(string.Join("\n", lines));
+            }
+            return string.Join("\n\n", kept);
+        }
+
+        static double Seconds(System.Text.RegularExpressions.Match m)
+        {
+            var h = m.Groups[1].Success ? int.Parse(m.Groups[1].Value) : 0;
+            var frac = m.Groups[5].Value;
+            return h * 3600 + int.Parse(m.Groups[2].Value) * 60 + int.Parse(m.Groups[3].Value)
+                 + int.Parse(frac) / Math.Pow(10, frac.Length);
+        }
+
+        static string Stamp(double seconds, string sep)
+        {
+            var ms = (long)Math.Round(seconds * 1000);
+            return string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:00}:{1:00}:{2:00}{3}{4:000}",
+                ms / 3600000, ms / 60000 % 60, ms / 1000 % 60, sep, ms % 1000);
+        }
         public int? SelectedAudioIndex
         {
             get
@@ -108,7 +225,8 @@ namespace Silolux.Services
             return path.Substring(0, dot) + ".vtt" + (q < 0 ? "" : url.Substring(q));
         }
 
-        public static async Task<PlaybackSession> StartAsync(string fileId, double startPosition, bool pinFile)
+        /// <param name="startPosition">Film seconds to start at, or null to resume where the server saved.</param>
+        public static async Task<PlaybackSession> StartAsync(string fileId, double? startPosition, bool pinFile)
         {
             await PlaybackCapabilities.ProbeAsync();
             var s = new PlaybackSession();
@@ -132,13 +250,17 @@ namespace Silolux.Services
                 .With("subtitle_fidelity_preference", "compatible")
                 .With("client_capabilities", PlaybackCapabilities.ClientCapabilities())
                 .With("client_playback_context", PlaybackCapabilities.PlaybackContext());
-            // Always sent, 0 included: without it the server resumes from the saved position,
-            // which turned "Start from beginning" into another resume.
-            body.With("start_position", Math.Max(0, startPosition));
+            // Omitted, the server resumes from its saved position. Sent (0 for "Play from start"), it's
+            // where playback begins: without the 0, "Play from start" became another resume.
+            if (startPosition.HasValue) body.With("start_position", Math.Max(0, startPosition.Value));
             if (pinFile) body.With("allow_alternate_versions", false);
             s.AddBandwidth(body);
 
             s.Adopt(await s.api.StartPlaybackAsync(body));
+            PlaybackLog.Write("start file " + fileId + ": asked " +
+                              (startPosition.HasValue ? "start_position " + PlaybackLog.Secs(startPosition.Value) : "no start_position (server resumes)") +
+                              "; plan starts at " + PlaybackLog.Secs(s.SourcePosition(s.PlayerStartSeconds)) + " via " + s.Delivery +
+                              ", session " + s.SessionId + ", profile " + AppSettings.ProfileId + ", server " + AppSettings.ServerUrl);
             await s.KeepSurroundAsync();
             return s;
         }
@@ -309,23 +431,28 @@ namespace Silolux.Services
         public async Task ReportProgressAsync(double playerSeconds, bool paused)
         {
             if (stopped || EndedByAdministrator) return;
-            sequence++;
+            var seq = ++sequence; // reports overlap; each logs its own number
             var body = new JsonObject()
                 .With("installation_id", installationId)
-                .With("sequence", sequence)
+                .With("sequence", seq)
                 .With("position", SourcePosition(playerSeconds))
                 .With("is_paused", paused);
             try
             {
-                await api.ProgressAsync(SessionId, body);
+                var answer = await api.ProgressAsync(SessionId, body);
+                PlaybackLog.Write("progress #" + seq + " at " + PlaybackLog.Secs(SourcePosition(playerSeconds)) +
+                                  (paused ? " paused" : "") + " -> " + PlaybackLog.Outcome(answer));
             }
             catch (ApiException e) when (e.Status == 410)
             {
+                PlaybackLog.Write("progress #" + seq + " -> 410 ended by administrator");
                 EndedByAdministrator = true;
             }
-            catch (ApiException)
+            catch (ApiException e)
             {
                 // A missed sample is replaced by the next one.
+                PlaybackLog.Write("progress #" + seq + " at " + PlaybackLog.Secs(SourcePosition(playerSeconds)) +
+                                  " -> FAILED " + e.Status + " " + e.Code + ": " + e.Message);
             }
         }
 
@@ -344,15 +471,18 @@ namespace Silolux.Services
             {
                 try
                 {
-                    await api.StopAsync(SessionId, body);
+                    var answer = await api.StopAsync(SessionId, body);
+                    PlaybackLog.Write("stop #" + sequence + " at " + PlaybackLog.Secs(SourcePosition(playerSeconds)) + " -> " + PlaybackLog.Outcome(answer));
                     return;
                 }
                 catch (ApiException e) when (e.Status == 404 || e.Status == 410)
                 {
+                    PlaybackLog.Write("stop #" + sequence + " -> " + e.Status + " " + e.Code + ": " + e.Message);
                     return;
                 }
-                catch (ApiException)
+                catch (ApiException e)
                 {
+                    PlaybackLog.Write("stop #" + sequence + " try " + (i + 1) + " -> FAILED " + e.Status + " " + e.Code + ": " + e.Message);
                     await Task.Delay(2000);
                 }
             }

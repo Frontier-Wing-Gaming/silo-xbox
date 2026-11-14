@@ -39,7 +39,7 @@ namespace Silolux.Services
     {
         public const string Platform = "xbox";
         public const string ClientName = "Silolux for Xbox";
-        public const string AppVersion = "0.2.0";
+        public const string AppVersion = "0.2.1";
 
         public static SiloClient Current { get; private set; }
 

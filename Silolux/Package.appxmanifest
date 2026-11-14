@@ -6,7 +6,7 @@
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
   IgnorableNamespaces="uap mp rescap">
 
-  <Identity Name="FrontierWingGaming.Silolux" Publisher="CN=FrontierWingGaming" Version="0.2.0.0" />
+  <Identity Name="FrontierWingGaming.Silolux" Publisher="CN=FrontierWingGaming" Version="0.2.1.0" />
 
   <mp:PhoneIdentity PhoneProductId="6e2c4a57-1d3b-4e7a-9c61-5a0f2b7d8e10" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
 

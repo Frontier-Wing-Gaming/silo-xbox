@@ -40,6 +40,13 @@ namespace Silolux.Views
         // Sidecar subtitle tracks by server track id, as Media Foundation resolves them.
         readonly Dictionary<string, TimedMetadataTrack> subtitleTracks = new Dictionary<string, TimedMetadataTrack>();
         string currentSubtitleId;
+        // The open stream's MediaSource (sidecars attach to it on demand) and its sidecars by track id.
+        MediaSource mediaSource;
+        readonly Dictionary<string, SidecarSubtitle> sidecarInfo = new Dictionary<string, SidecarSubtitle>();
+        // The track to turn on once its source resolves.
+        string pendingSubtitleId;
+        // How each sidecar was loaded, for the playback report.
+        readonly List<string> subtitleNotes = new List<string>();
         PlayArgs args;
         JsonObject item;
         bool pickerOpen;
@@ -257,35 +264,98 @@ namespace Silolux.Views
             }
 
             sidecars.Clear();
+            subtitleNotes.Clear();
             subtitleTracks.Clear();
             selectedSubtitle = null;
             var selectedId = session.SelectedSubtitleId;
             currentSubtitleId = selectedId;
+            // Only the chosen track loads with the stream. An embedded track costs the server a read
+            // through the whole film; attaching all of them (16 on some films) made it read the film
+            // over and over while streaming it, and the picture and subtitles lagged.
+            mediaSource = source;
+            sidecarInfo.Clear();
+            pendingSubtitleId = selectedId;
             foreach (var sub in session.SidecarSubtitles())
             {
-                var tts = TimedTextSource.CreateFromUri(sub.Url, sub.Language);
-                var label = sub.Label;
-                var trackId = sub.TrackId;
-                var isSelected = trackId != null && trackId == selectedId;
-                tts.Resolved += (s, a) =>
-                {
-                    foreach (var t in a.Tracks)
-                    {
-                        t.Label = label;
-                        if (trackId != null) subtitleTracks[trackId] = t;
-                        if (isSelected) selectedSubtitle = t;
-                    }
-                };
-                source.ExternalTimedTextSources.Add(tts);
-                sidecars.Add(new KeyValuePair<TimedTextSource, string>(tts, label));
+                if (sub.TrackId != null) sidecarInfo[sub.TrackId] = sub;
+                if (sub.TrackId != null && sub.TrackId == selectedId) await AttachSubtitleAsync(sub);
             }
 
-            var start = TimeSpan.FromSeconds(Math.Max(0, session.PlayerStartSeconds));
-            playbackItem = new MediaPlaybackItem(source, start);
+            // No start time on the item: MediaPlaybackItem(source, start) trims the item, and its clock,
+            // length and subtitle cues then count from the trim. StartAtPlanPosition's seek to the plan
+            // start on top of that put the picture at twice the resume point (a resume at 6:38 showed
+            // 13:16) while the clock and subtitles read 6:38.
+            playbackItem = new MediaPlaybackItem(source);
+            startPending = true;
             playbackItem.TimedMetadataTracksChanged += (s, a) => ApplySubtitleSelection();
             playbackItem.AudioTracksChanged += (s, a) => ApplyAudioSelection();
             ApplySeekMode();
             player.Source = playbackItem;
+        }
+
+        /// <summary>Fetches one sidecar and adds it to the open stream; it turns on if it's the pending choice.</summary>
+        async Task AttachSubtitleAsync(SidecarSubtitle sub)
+        {
+            var source = mediaSource;
+            var tts = await SubtitleSourceAsync(sub);
+            if (source == null || !ReferenceEquals(source, mediaSource)) return; // the stream changed meanwhile
+            var label = sub.Label;
+            var trackId = sub.TrackId;
+            tts.Resolved += (s, a) =>
+            {
+                foreach (var t in a.Tracks)
+                {
+                    t.Label = label;
+                    if (trackId != null) subtitleTracks[trackId] = t;
+                    if (trackId != null && trackId == pendingSubtitleId) selectedSubtitle = t;
+                }
+                // The track may already be in the item's list by now; turn it on either way.
+                var _ = Dispatcher.RunAsync(CoreDispatcherPriority.Normal, ApplySubtitleSelection);
+            };
+            source.ExternalTimedTextSources.Add(tts);
+            sidecars.Add(new KeyValuePair<TimedTextSource, string>(tts, label));
+        }
+
+        /// <summary>
+        /// The sidecar as a timed-text source. The server times subtitle files from the film's start;
+        /// for a stream started mid-film the player's clock starts at the stream's origin, so the
+        /// track is fetched here and moved earlier by that offset (see PlaybackSession.ShiftCues).
+        /// </summary>
+        async Task<TimedTextSource> SubtitleSourceAsync(SidecarSubtitle sub)
+        {
+            var offset = session.TimelineOffset;
+            var name = sub.Label + " (" + (sub.Language ?? "?") + ")";
+            var started = DateTimeOffset.UtcNow;
+            try
+            {
+                using (var http = new Windows.Web.Http.HttpClient())
+                {
+                    var buffer = await http.GetBufferAsync(sub.Url);
+                    var bytes = new byte[buffer.Length];
+                    using (var reader = Windows.Storage.Streams.DataReader.FromBuffer(buffer)) reader.ReadBytes(bytes);
+                    var text = System.Text.Encoding.UTF8.GetString(bytes).TrimStart('﻿');
+                    PlaybackLog.Write("subtitle " + name + ": " + PlaybackLog.Describe(sub.Url, text));
+                    var shifted = System.Text.Encoding.UTF8.GetBytes(Math.Abs(offset) < 0.05 ? text : PlaybackSession.ShiftCues(text, offset));
+                    var stream = new Windows.Storage.Streams.InMemoryRandomAccessStream();
+                    using (var writer = new Windows.Storage.Streams.DataWriter(stream))
+                    {
+                        writer.WriteBytes(shifted);
+                        await writer.StoreAsync();
+                        writer.DetachStream();
+                    }
+                    stream.Seek(0);
+                    subtitleNotes.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                        "{0}: {1} bytes in {2:0.0} s{3}", name, shifted.Length, (DateTimeOffset.UtcNow - started).TotalSeconds,
+                        Math.Abs(offset) < 0.05 ? "" : string.Format(System.Globalization.CultureInfo.InvariantCulture, ", shifted {0:0.###} s earlier", offset)));
+                    return TimedTextSource.CreateFromStream(stream, sub.Language);
+                }
+            }
+            catch (Exception ex)
+            {
+                subtitleNotes.Add(name + ": shift failed (" + ex.Message.Trim() + "), loaded unshifted");
+                // Late subtitles beat none.
+                return TimedTextSource.CreateFromUri(sub.Url, sub.Language);
+            }
         }
 
         void ApplySubtitleSelection()
@@ -293,8 +363,9 @@ namespace Silolux.Views
             if (playbackItem == null || selectedSubtitle == null) return;
             var tracks = playbackItem.TimedMetadataTracks;
             for (var i = 0; i < tracks.Count; i++)
-                if (ReferenceEquals(tracks[i], selectedSubtitle))
-                    tracks.SetPresentationMode((uint)i, TimedMetadataTrackPresentationMode.PlatformPresented);
+                tracks.SetPresentationMode((uint)i, ReferenceEquals(tracks[i], selectedSubtitle)
+                    ? TimedMetadataTrackPresentationMode.PlatformPresented
+                    : TimedMetadataTrackPresentationMode.Disabled);
         }
 
         void ApplyAudioSelection()
@@ -327,6 +398,25 @@ namespace Silolux.Views
         /// LocalState\playback.txt: what the server sent, what the player decodes and what the TV is
         /// showing, mid-playback. Diagnostics can't see this itself (opening it leaves the player).
         /// </summary>
+        static Task pendingStop;
+
+        /// <summary>Waits (up to <paramref name="limit"/>) for the last player's stop report to reach the server.</summary>
+        public static async Task WaitForStopAsync(TimeSpan limit)
+        {
+            var stop = pendingStop;
+            if (stop == null || stop.IsCompleted) return;
+            try { await Task.WhenAny(stop, Task.Delay(limit)); }
+            catch (Exception) { }
+        }
+
+        static string CueText(IMediaCue cue)
+        {
+            var t = cue as TimedTextCue;
+            if (t == null) return "";
+            var text = string.Join(" / ", t.Lines.Select(l => l.Text));
+            return text.Length > 80 ? text.Substring(0, 80) + "…" : text;
+        }
+
         async Task WritePlaybackReportAsync()
         {
             try
@@ -353,6 +443,29 @@ namespace Silolux.Views
                                  (ps != null && ps.NaturalVideoWidth > 0 ? ps.NaturalVideoWidth + "×" + ps.NaturalVideoHeight : props.Width + "×" + props.Height) +
                                  (props.FrameRate.Denominator != 0 ? string.Format(System.Globalization.CultureInfo.InvariantCulture, " @ {0:0.###} fps",
                                      (double)props.FrameRate.Numerator / props.FrameRate.Denominator) : ""));
+                var tl = session.Plan.Path("timeline");
+                if (tl != null)
+                    b.AppendLine(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                        "  Timeline: origin {0:0.###} s, offset {1:0.###} s, player start {2:0.###} s, seek anywhere {3}",
+                        tl.Num("stream_origin_seconds"), tl.Num("timeline_offset_seconds"), tl.Num("player_start_seconds"),
+                        tl.Bool("can_seek_anywhere", true) ? "yes" : "no"));
+                foreach (var note in subtitleNotes) b.AppendLine("  Subtitle " + note);
+                if (subtitleNotes.Count == 0) b.AppendLine("  Subtitles: none attached");
+                if (ps != null)
+                {
+                    var pos = ps.Position.TotalSeconds;
+                    b.AppendLine(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                        "  Position: player {0:0.###} s, film {1:0.###} s", pos, session.SourcePosition(pos)));
+                }
+                var showing = selectedSubtitle;
+                if (showing != null)
+                {
+                    b.AppendLine("  Subtitle showing: " + showing.Label + " (" + showing.Language + ")");
+                    foreach (var cue in showing.ActiveCues.Take(2))
+                        b.AppendLine(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                            "    on screen now: {0:0.###}-{1:0.###} s player time  \"{2}\"", cue.StartTime.TotalSeconds,
+                            (cue.StartTime + cue.Duration).TotalSeconds, CueText(cue)));
+                }
                 b.AppendLine("  Display match: " + (display?.LastDecision ?? "not on this device"));
                 try
                 {
@@ -470,9 +583,8 @@ namespace Silolux.Views
         }
 
         /// <summary>
-        /// Media Foundation ignores MediaPlaybackItem's start time for HLS (AdaptiveMediaSource) and
-        /// plays from the stream's first segment, so a resume started over and the clock read from 0.
-        /// Seek to the plan's start once the stream is open.
+        /// Every stream opens at its beginning (the item has no start time; see LoadPlanAsync), so
+        /// seek to the plan's start once it's open.
         /// </summary>
         void StartAtPlanPosition()
         {
@@ -485,7 +597,12 @@ namespace Silolux.Views
                     ps.Position = TimeSpan.FromSeconds(start);
             }
             catch (Exception) { }
+            finally { startPending = false; }
         }
+
+        // Between building the item and the start seek, the player's clock reads the stream's
+        // beginning; a progress report then would move the resume point there.
+        bool startPending;
 
         // Skips: D-pad left / right with the controls hidden, LB / RB any time; SeekStrip shows the
         // film's time. Most streams skip in the player. A stream the server started mid-film (a remux;
@@ -670,6 +787,7 @@ namespace Silolux.Views
         {
             try
             {
+                if (startPending && session != null) return session.PlayerStartSeconds;
                 var p = player?.PlaybackSession.Position.TotalSeconds ?? lastPosition;
                 if (p > 0) lastPosition = p;
             }
@@ -839,10 +957,27 @@ namespace Silolux.Views
 
         static TrackChoice Picked(ListView list) => (list.SelectedItem as ListViewItem)?.Tag as TrackChoice;
 
-        /// <summary>Subtitles are sidecar files already attached to the player: switch locally.</summary>
-        void ShowSubtitle(string trackId)
+        /// <summary>
+        /// Subtitles switch locally. A track not used yet in this stream is fetched first (one
+        /// request), then turned on when the player has read it.
+        /// </summary>
+        async void ShowSubtitle(string trackId)
         {
             if (playbackItem == null) return;
+            pendingSubtitleId = trackId;
+            SidecarSubtitle sub;
+            if (trackId != null && !subtitleTracks.ContainsKey(trackId) && sidecarInfo.TryGetValue(trackId, out sub))
+            {
+                currentSubtitleId = trackId;
+                ShowHint("Loading subtitles\u2026", 4000);
+                selectedSubtitle = null;
+                var current = playbackItem.TimedMetadataTracks;
+                for (var i = 0; i < current.Count; i++)
+                    current.SetPresentationMode((uint)i, TimedMetadataTrackPresentationMode.Disabled);
+                await AttachSubtitleAsync(sub);
+                // Resolved sets selectedSubtitle; TimedMetadataTracksChanged then turns it on.
+                return;
+            }
             var tracks = playbackItem.TimedMetadataTracks;
             TimedMetadataTrack wanted = null;
             if (trackId != null) subtitleTracks.TryGetValue(trackId, out wanted);
@@ -888,6 +1023,17 @@ namespace Silolux.Views
 
         protected override async void OnNavigatedFrom(NavigationEventArgs e)
         {
+            // Registered first: the page we return to checks it straight away.
+            var stopped = new TaskCompletionSource<bool>();
+            pendingStop = stopped.Task;
+            try { await LeaveAsync(); }
+            finally { stopped.TrySetResult(true); }
+        }
+
+        async Task LeaveAsync()
+        {
+            if (session != null && player != null && Overlay.Visibility != Visibility.Visible)
+                await WritePlaybackReportAsync();
             leaving = true;
             timer?.Stop();
             if (controlPanelStates != null) controlPanelStates.CurrentStateChanged -= ControlPanelStateChanged;
