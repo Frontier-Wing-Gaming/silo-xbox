@@ -56,6 +56,15 @@ namespace Silolux.Services
         public static double ProfileNameFontSize => Tv ? 15 : 22;
         public static Thickness ProfileTileMargin => Tv ? new Thickness(8) : new Thickness(12);
 
+        // Player.
+        public static double PlayerStatusFontSize => Tv ? 16 : 22;
+        public static double PlayerStatusMaxWidth => Tv ? 600 : 900;
+        public static double PlayerHintFontSize => Tv ? 13 : 16;
+        public static Thickness PlayerHintMargin => Tv ? new Thickness(0, 16, 24, 0) : new Thickness(0, 24, 32, 0);
+        public static double DialogHeadingFontSize => Tv ? 16 : 20;
+        public static double DialogItemFontSize => Tv ? 14 : 18;
+        public static double DialogListMaxHeight => Tv ? 180 : 260;
+
         // Buttons (the shared button styles hold the PC values; a Style setter can't x:Bind).
         public static double ButtonFontSize => Tv ? 15 : 20;
         public static Thickness ButtonPadding => Tv ? new Thickness(18, 8, 18, 8) : new Thickness(28, 12, 28, 12);

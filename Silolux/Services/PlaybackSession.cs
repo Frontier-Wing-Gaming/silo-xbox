@@ -51,6 +51,11 @@ namespace Silolux.Services
             }
         }
         public string SelectedSubtitleId => Plan.Path("selected_tracks/subtitle")?.Str("id");
+        /// <summary>The file actually playing (a fallback can differ from the one requested).</summary>
+        public string EffectiveFileId => Plan.Str("effective_media_file_id") ?? Plan.Str("requested_media_file_id");
+
+        /// <summary>The server's track id for the nth audio track of the playing file.</summary>
+        public string AudioTrackId(int index) => "file:" + EffectiveFileId + ":audio:" + index;
 
         public IEnumerable<SidecarSubtitle> SidecarSubtitles()
         {
@@ -119,17 +124,40 @@ namespace Silolux.Services
         {
             if (attemptCount >= MaxAttempts) return false;
             attemptCount++;
-            var keys = new JsonArray();
-            foreach (var k in attemptedKeys.Skip(Math.Max(0, attemptedKeys.Count - 16))) keys.Add(JsonValue.CreateStringValue(k));
-            var tracks = Plan.Obj("selected_tracks") ?? new JsonObject();
             var failure = new JsonObject().With("classification", classification);
             if (!string.IsNullOrEmpty(message))
                 failure.With("message", message.Length > 400 ? message.Substring(0, 400) : message);
-            var body = new JsonObject()
+            var tracks = Plan.Obj("selected_tracks") ?? new JsonObject();
+            var body = ReplanBody("failure_recovery", playerSeconds, JsonObject.Parse(tracks.Stringify()))
+                .With("failure", failure);
+            await ReplanAsync(body);
+            return true;
+        }
+
+        /// <summary>
+        /// The viewer picked an audio track (and keeps <paramref name="subtitleTrackId"/>, or
+        /// null for subtitles off). A track_change replan: the answer is a new plan for the
+        /// same title at <paramref name="playerSeconds"/>, which the caller loads.
+        /// </summary>
+        public async Task ChangeTracksAsync(int audioIndex, string subtitleTrackId, double playerSeconds)
+        {
+            var tracks = new JsonObject().With("audio", new JsonObject()
+                .With("id", AudioTrackId(audioIndex))
+                .With("index", audioIndex));
+            if (!string.IsNullOrEmpty(subtitleTrackId))
+                tracks.With("subtitle", new JsonObject().With("id", subtitleTrackId));
+            await ReplanAsync(ReplanBody("track_change", playerSeconds, tracks));
+        }
+
+        JsonObject ReplanBody(string operation, double playerSeconds, JsonObject selectedTracks)
+        {
+            var keys = new JsonArray();
+            foreach (var k in attemptedKeys.Skip(Math.Max(0, attemptedKeys.Count - 16))) keys.Add(JsonValue.CreateStringValue(k));
+            return new JsonObject()
                 .With("installation_id", installationId)
                 .With("protocol_version", 3)
                 .With("client_features", Json.Strings(PlaybackCapabilities.ClientFeatures))
-                .With("operation", "failure_recovery")
+                .With("operation", operation)
                 .With("playback_attempt_id", attemptId)
                 .With("replan_request_id", Guid.NewGuid().ToString("D"))
                 .With("failed_plan_id", Plan.Str("plan_id"))
@@ -140,14 +168,16 @@ namespace Silolux.Services
                 .With("quality_preference", "auto")
                 .With("position_seconds", SourcePosition(playerSeconds))
                 .With("metered", false)
-                .With("selected_tracks", JsonObject.Parse(tracks.Stringify()))
-                .With("failure", failure)
+                .With("selected_tracks", selectedTracks)
                 .With("client_capabilities", PlaybackCapabilities.ClientCapabilities())
                 .With("client_playback_context", PlaybackCapabilities.PlaybackContext());
+        }
+
+        async Task ReplanAsync(JsonObject body)
+        {
             var decision = await api.SendAsync(Windows.Web.Http.HttpMethod.Post,
                 "/api/v2/playback/" + Uri.EscapeDataString(SessionId) + "/replan", body);
             Adopt(decision);
-            return true;
         }
 
         public async Task ReportProgressAsync(double playerSeconds, bool paused)
