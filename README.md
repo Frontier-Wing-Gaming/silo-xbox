@@ -85,8 +85,20 @@ package signed with a different certificate has to be uninstalled first. The cer
 subject must be the manifest's `Publisher`, `CN=FrontierWingGaming`. On a PC, trust the
 `.cer` (Local Machine, Trusted People) before installing.
 
-Store publishing needs a Partner Center app reservation. Replace `Identity`, `Publisher` and
-`PhoneProductId` in `Package.appxmanifest` with the reserved values.
+## Microsoft Store
+
+1. Reserve "Silolux" in Partner Center, then copy the three values on *Product management →
+   Product identity* into repository variables (Settings → Secrets and variables → Actions →
+   Variables): `STORE_IDENTITY_NAME`, `STORE_PUBLISHER` and `STORE_PUBLISHER_DISPLAY_NAME`.
+2. Run the *Store package* workflow (or push a `v*` tag). It applies that identity with
+   `scripts/set-store-identity.ps1` and builds the `.msixupload` to upload in the submission.
+   The Store signs it; the sideload certificate is not used. To build one locally, run the
+   script, build with `/p:UapAppxPackageBuildMode=StoreUpload`, and don't commit the changed
+   manifest.
+3. Run the Windows App Certification Kit on the package before submitting.
+
+Privacy policy URL for the listing:
+https://github.com/Frontier-Wing-Gaming/silo-xbox/blob/main/PRIVACY.md
 
 ## Playing
 

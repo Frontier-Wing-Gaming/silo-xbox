@@ -1,0 +1,58 @@
+name: Store package
+
+# Builds the .msixupload to submit in Partner Center. Run it from the Actions tab
+# (Run workflow), or push a tag like v0.2.0.
+#
+# Store builds carry the identity Partner Center reserved for Silolux, not the sideload one
+# (CN=FrontierWingGaming). Copy the three values from Partner Center → Silolux → Product
+# management → Product identity into repository variables (Settings → Secrets and variables
+# → Actions → Variables):
+#   STORE_IDENTITY_NAME             Package/Identity/Name, e.g. 12345FrontierWingGaming.Silolux
+#   STORE_PUBLISHER                 Package/Identity/Publisher, e.g. CN=1A2B3C4D-...
+#   STORE_PUBLISHER_DISPLAY_NAME    Package/Properties/PublisherDisplayName
+# The Store signs the package itself, so no certificate is involved.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  store:
+    runs-on: windows-latest
+    env:
+      STORE_IDENTITY_NAME: ${{ vars.STORE_IDENTITY_NAME }}
+      STORE_PUBLISHER: ${{ vars.STORE_PUBLISHER }}
+      STORE_PUBLISHER_DISPLAY_NAME: ${{ vars.STORE_PUBLISHER_DISPLAY_NAME }}
+    steps:
+      - name: Check the Store identity is set
+        shell: pwsh
+        run: |
+          $missing = "STORE_IDENTITY_NAME", "STORE_PUBLISHER", "STORE_PUBLISHER_DISPLAY_NAME" |
+            Where-Object { -not [Environment]::GetEnvironmentVariable($_) }
+          if ($missing) {
+            Write-Host "::error::Set these repository variables from Partner Center's Product identity page: $($missing -join ', ')"
+            exit 1
+          }
+
+      - uses: actions/checkout@v4
+
+      - uses: microsoft/setup-msbuild@v2
+
+      - name: Apply the Store identity
+        shell: pwsh
+        run: ./scripts/set-store-identity.ps1 -Name $env:STORE_IDENTITY_NAME -Publisher $env:STORE_PUBLISHER -PublisherDisplayName $env:STORE_PUBLISHER_DISPLAY_NAME
+
+      - name: Build Store upload
+        run: >
+          msbuild Silolux\Silolux.csproj /restore /m
+          /p:Configuration=Release /p:Platform=x64
+          /p:UapAppxPackageBuildMode=StoreUpload
+          /p:AppxBundle=Always /p:AppxBundlePlatforms=x64
+          /p:AppxPackageSigningEnabled=false
+          /p:AppxPackageDir=${{ runner.temp }}\store\
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: silolux-xbox-store-upload
+          path: ${{ runner.temp }}\store\*.msixupload
+          if-no-files-found: error
