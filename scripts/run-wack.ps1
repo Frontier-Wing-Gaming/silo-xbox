@@ -28,7 +28,8 @@ New-Item -ItemType Directory $work | Out-Null
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $thumb = $null
 try {
-  $source = (Resolve-Path $Package).Path
+  if (-not (Test-Path -LiteralPath $Package)) { throw "No file at $Package" }
+  $source = (Resolve-Path -LiteralPath $Package).Path
   if ($source -like "*.msixupload" -or $source -like "*.appxupload") {
     throw ("$Package is the Store upload, which holds IL the Store compiles later and can't run here. " +
       "Test the .msixbundle in the build's *_Test folder (the silolux-xbox-wack-bundle artifact) instead.")
@@ -83,7 +84,11 @@ try {
     Remove-Item "Cert:\LocalMachine\TrustedPeople\$thumb" -ErrorAction SilentlyContinue
     Remove-Item "Cert:\CurrentUser\My\$thumb" -ErrorAction SilentlyContinue
   }
-  Get-AppxPackage -Name $name -ErrorAction SilentlyContinue | Where-Object { $_.Publisher -eq $publisher } |
-    Remove-AppxPackage -ErrorAction SilentlyContinue
+  # $name is unset when the script stopped before reading the manifest (e.g. a wrong path);
+  # skip the uninstall then, so the original error is the one you see.
+  if ($name) {
+    Get-AppxPackage -Name $name -ErrorAction SilentlyContinue | Where-Object { $_.Publisher -eq $publisher } |
+      Remove-AppxPackage -ErrorAction SilentlyContinue
+  }
   Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
 }
