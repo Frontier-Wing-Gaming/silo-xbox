@@ -14,8 +14,11 @@
             <TextBlock Text="Sign in on another device" Style="{StaticResource PageTitle}" />
             <TextBlock Style="{StaticResource Muted}" Text="On your phone or computer, open this address and enter the code:" />
             <TextBlock x:Name="ActivateUrl" FontSize="26" FontWeight="SemiBold" Margin="0,16,0,0" IsTextSelectionEnabled="False" TextWrapping="Wrap" />
-            <TextBlock x:Name="Code" FontSize="88" FontWeight="Bold" CharacterSpacing="120"
-                       Foreground="{StaticResource SiloAccentBrush}" Margin="0,12,0,0" />
+            <!-- Xbox lays out at 960x540, where this column is ~340 px wide: shrink the code to fit. -->
+            <Viewbox StretchDirection="DownOnly" HorizontalAlignment="Left" Margin="0,12,0,0">
+                <TextBlock x:Name="Code" FontSize="88" FontWeight="Bold" CharacterSpacing="80"
+                           Foreground="{StaticResource SiloAccentBrush}" />
+            </Viewbox>
             <TextBlock x:Name="DeviceStatus" Style="{StaticResource Muted}" Margin="0,12,0,0" />
             <Button x:Name="NewCode" Content="Get a new code" Style="{StaticResource SecondaryButton}"
                     Margin="0,24,0,0" Click="NewCode_Click" Visibility="Collapsed" />
