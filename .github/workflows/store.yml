@@ -56,3 +56,11 @@ jobs:
           name: silolux-xbox-store-upload
           path: ${{ runner.temp }}\store\*.msixupload
           if-no-files-found: error
+
+      # The same build compiled to native code, for scripts/run-wack.ps1. The upload above
+      # holds IL that the Store compiles after submission, so it can't be tested locally.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: silolux-xbox-wack-bundle
+          path: ${{ runner.temp }}\store\*_Test\*.msixbundle
+          if-no-files-found: error

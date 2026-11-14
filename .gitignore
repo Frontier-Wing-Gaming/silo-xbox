@@ -5,3 +5,4 @@ BundleArtifacts/
 *.user
 .vs/
 *.pfx
+wack-report.xml

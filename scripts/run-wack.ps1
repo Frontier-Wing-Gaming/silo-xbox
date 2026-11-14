@@ -1,8 +1,13 @@
-# Runs the Windows App Certification Kit on a Store package before you submit it.
+# Runs the Windows App Certification Kit on a Store build before you submit it.
 # Usage, in an administrator PowerShell (the kit installs the package to test it):
-#   powershell -ExecutionPolicy Bypass -File scripts\run-wack.ps1 -Package <path to .msixupload, .msixbundle or .msix>
+#   powershell -ExecutionPolicy Bypass -File scripts\run-wack.ps1 -Package <..._Test\Silolux_..._x64.msixbundle>
 #
-# Store packages are unsigned (the Store signs them), and the kit can only install a signed
+# Test the bundle in the build's *_Test folder (the "silolux-xbox-wack-bundle" artifact of the
+# Store package workflow), not the .msixupload. The upload holds the app as IL, which the Store
+# compiles with .NET Native after submission; it can't run as-is, so the kit reports it as
+# crashing at launch. The _Test bundle is the same build already compiled to native code.
+#
+# Store builds are unsigned (the Store signs them), and the kit can only install a signed
 # package. So this signs a copy with a throwaway certificate whose subject matches the
 # package's Publisher, trusts it for the test, and removes it again afterwards.
 param(
@@ -23,12 +28,10 @@ New-Item -ItemType Directory $work | Out-Null
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $thumb = $null
 try {
-  # A .msixupload is a zip around the bundle and its symbols: take the bundle out.
   $source = (Resolve-Path $Package).Path
   if ($source -like "*.msixupload" -or $source -like "*.appxupload") {
-    [IO.Compression.ZipFile]::ExtractToDirectory($source, "$work\upload")
-    $source = (Get-ChildItem "$work\upload" -Include *.msixbundle, *.appxbundle, *.msix, *.appx -Recurse | Select-Object -First 1).FullName
-    if (-not $source) { throw "No package inside $Package" }
+    throw ("$Package is the Store upload, which holds IL the Store compiles later and can't run here. " +
+      "Test the .msixbundle in the build's *_Test folder (the silolux-xbox-wack-bundle artifact) instead.")
   }
   $target = Join-Path $work (Split-Path $source -Leaf)
   Copy-Item $source $target
@@ -65,13 +68,15 @@ try {
   $overall = $result.REPORT.OVERALL_RESULT
   Write-Host ""
   Write-Host "Overall result: $overall"
-  $failed = $result.SelectNodes("//TEST[@RESULT='FAIL']")
-  foreach ($t in $failed) {
-    Write-Host ("  FAIL  " + $t.NAME)
-    foreach ($m in $t.SelectNodes(".//MESSAGE")) { Write-Host ("        " + $m.TEXT) }
+  # Each TEST holds its outcome in a RESULT child element, not an attribute.
+  foreach ($t in $result.SelectNodes("//TEST")) {
+    $outcome = ($t.RESULT.'#cdata-section', $t.RESULT.InnerText | Where-Object { $_ } | Select-Object -First 1)
+    if ($outcome) { $outcome = $outcome.Trim() }
+    if ($outcome -and $outcome -ne "PASS") {
+      Write-Host ("  {0}  {1}" -f $outcome, $t.NAME)
+      foreach ($m in $t.SelectNodes(".//MESSAGE")) { Write-Host ("        " + $m.TEXT) }
+    }
   }
-  $warned = $result.SelectNodes("//TEST[@RESULT='WARNING']")
-  foreach ($t in $warned) { Write-Host ("  WARN  " + $t.NAME) }
   Write-Host "Full report: $Report"
 } finally {
   if ($thumb) {
