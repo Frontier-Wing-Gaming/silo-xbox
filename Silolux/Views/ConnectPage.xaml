@@ -1,0 +1,22 @@
+<Page
+    x:Class="Silolux.Views.ConnectPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Background="{StaticResource SiloBackgroundBrush}">
+    <Grid>
+        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="720">
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,32">
+                <Image Source="ms-appx:///Assets/AppIcon.png" Width="72" Height="72" />
+                <TextBlock Text="Silolux" FontSize="56" FontWeight="SemiBold" VerticalAlignment="Center" Margin="20,0,0,0" />
+            </StackPanel>
+            <TextBlock Text="Server address" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,10" />
+            <TextBox x:Name="Address" FontSize="24" PlaceholderText="http://192.168.1.20:8090"
+                     InputScope="Url" IsSpellCheckEnabled="False" KeyDown="Address_KeyDown" />
+            <TextBlock Style="{StaticResource Muted}" Margin="0,10,0,24"
+                       Text="The address you open Silo at in a browser, including the port." />
+            <Button x:Name="ConnectButton" Content="Connect" Style="{StaticResource PrimaryButton}" Click="Connect_Click" />
+            <ProgressRing x:Name="Busy" Width="40" Height="40" Margin="0,24,0,0" HorizontalAlignment="Left" />
+            <TextBlock x:Name="Error" Foreground="#FFFF8A8A" FontSize="20" TextWrapping="Wrap" Margin="0,12,0,0" />
+        </StackPanel>
+    </Grid>
+</Page>

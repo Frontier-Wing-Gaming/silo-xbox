@@ -1,0 +1,83 @@
+# Silolux for Xbox
+
+A native Xbox (UWP, C#/XAML) client for [Silo](https://github.com/Silo-Server/silo-server):
+sign-in, profiles, home rows, movie and series pages, and playback through Media Foundation, all
+on Silo's native `/api/v2` and playback protocol v3. It also runs on Windows desktops.
+
+Status: early prototype, `0.1.0`.
+
+Silolux is an independent project by Frontier Wing Gaming. It is not made, endorsed or supported
+by Silo Media L.L.C.; "Silo" is their trademark and is used here only to say what this app connects to.
+
+## Features
+
+| Area | Behavior |
+| --- | --- |
+| Connect | Server address entry, checked against `/api/v2/system/info` (`api_major` 2). |
+| Sign-in | Device sign-in: the console shows a code, you approve it at `<server>/activate` on another device. A username and password form sits alongside. The refresh token is kept in the Credential Locker and rotated in a single flight. |
+| Profiles | Picker with PIN entry (`verify-pin`). One profile without a PIN is picked automatically. |
+| Home | `/home/sections` rows. Continue Watching style rows use landscape art and progress bars. |
+| Details | Movies and episodes get Resume / Play from start. Series get a season strip, an episode list, and Play next episode from `play_content_id`. |
+| Playback | `MediaPlayer` with `AdaptiveMediaSource` for HLS. Progress is sequenced every 10 s and on pause, with a stop on exit. A decode or network failure triggers a `failure_recovery` replan, up to 8 attempts. Sidecar text subtitles load as `TimedTextSource`. The server's audio pick is applied on original files. |
+| Capabilities | Decoders are probed with `CodecQuery` (H.264, HEVC, VP9, AV1, MPEG-2, VC-1; AAC, MP3, AC-3, E-AC-3, FLAC, ALAC, Opus). HDR10 is reported only when the HDMI display modes support SMPTE 2084. No passthrough or Dolby Vision claims. |
+
+Media URLs carry the account bearer as `token` only for server-relative paths, as the web player
+does. Absolute node or proxy URLs never get it.
+
+## Build
+
+Needs Visual Studio 2022 or later with the **Universal Windows Platform development** workload.
+
+```powershell
+# Debug (deploys to this PC from Visual Studio: open Silolux\Silolux.csproj, F5)
+msbuild Silolux\Silolux.csproj /restore /p:Configuration=Debug /p:Platform=x64
+
+# Release (.NET Native), produces Silolux\AppPackages\...\Silolux_0.1.0.0_x64.msix
+msbuild Silolux\Silolux.csproj /restore /p:Configuration=Release /p:Platform=x64
+```
+
+Regenerate tiles from an icon with `scripts/make-assets.ps1 -Source <icon.png>`.
+
+Testing on a PC that also runs the server: UWP apps can't connect to their own machine
+(including `localhost` and the PC's LAN IP) until exempted. Run once, elevated:
+
+```powershell
+# Quote the argument: PowerShell splits -n=... at the dot otherwise.
+CheckNetIsolation LoopbackExempt -a '-n=<PackageFamilyName>'
+```
+
+Use `http://127.0.0.1:<port>`, not `localhost`: `localhost` resolves to `::1` first, Docker
+Desktop's port forwarding answers on IPv4 only, and Windows.Web.Http does not fall back.
+
+With WSL `networkingMode=Mirrored`, Docker ports have no Windows-side listener and the
+exemption does not reach them. Put a plain TCP relay on Windows in front (any process that
+listens on, say, `127.0.0.1:8091` and forwards to the server port) and connect to that.
+
+The suffix comes from the signing publisher; `Get-AppxPackage FrontierWingGaming.Silolux` shows the exact
+`PackageFamilyName`. A console reaching a server on another machine needs no exemption.
+
+## Run on an Xbox
+
+1. Turn on **Developer Mode** on the console (Xbox Dev Mode app, one-time Partner Center
+   developer account).
+2. Sign the package with a test certificate. Either set `AppxPackageSigningEnabled` to `true`
+   with a `PackageCertificateKeyFile`, or let Visual Studio create one under
+   *Package.appxmanifest → Packaging*.
+3. Deploy from Visual Studio (*Remote Machine*, the console's IP), or upload the `.msix` and its
+   dependencies in the Dev Home portal at `https://<xbox-ip>:11443`.
+
+Store publishing needs a Partner Center app reservation. Replace `Identity`, `Publisher` and
+`PhoneProductId` in `Package.appxmanifest` with the reserved values.
+
+## Known gaps
+
+- No search, library browsing beyond home rows, watch party, trailers, or subtitle and audio menus
+  (the transport controls show the tracks the stream exposes).
+- No seek re-anchor for server-anchored HLS timelines. Seeking works inside what the stream
+  exposes.
+- A PIN profile's token is held in memory only, so a cold start returns to the profile picker.
+- Not tested on console hardware or against a live server yet.
+
+## License
+
+AGPL-3.0-or-later, matching Silo.
