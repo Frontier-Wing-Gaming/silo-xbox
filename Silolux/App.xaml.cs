@@ -4,8 +4,10 @@ using Silolux.Views;
 using Windows.ApplicationModel;
 using Windows.ApplicationModel.Activation;
 using Windows.UI.Core;
+using Windows.UI.ViewManagement.Core;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
+using Windows.UI.Xaml.Input;
 using Windows.UI.Xaml.Media;
 
 namespace Silolux
@@ -33,6 +35,9 @@ namespace Silolux
                 // On a PC, Esc / Alt+Left / Backspace and the mouse back button do not.
                 Window.Current.CoreWindow.Dispatcher.AcceleratorKeyActivated += OnAcceleratorKey;
                 Window.Current.CoreWindow.PointerPressed += OnPointerPressed;
+                // Text fields: A on a controller opens the on-screen keyboard. Xbox does not
+                // always do this itself (e.g. after focus was set in code), so ask for it.
+                frame.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(OnKeyDown), true);
                 frame.Navigated += (s, a) => UpdateBackButton();
             }
             if (e.PrelaunchActivated) return;
@@ -83,12 +88,26 @@ namespace Silolux
             if (e.EventType != CoreAcceleratorKeyEventType.KeyDown && e.EventType != CoreAcceleratorKeyEventType.SystemKeyDown) return;
             if (e.Handled) return;
             var alt = (Window.Current.CoreWindow.GetKeyState(Windows.System.VirtualKey.Menu) & CoreVirtualKeyStates.Down) != 0;
-            var focused = Windows.UI.Xaml.Input.FocusManager.GetFocusedElement();
+            var focused = FocusManager.GetFocusedElement();
             var typing = focused is TextBox || focused is PasswordBox;
             var back = e.VirtualKey == Windows.System.VirtualKey.Escape
                     || (alt && e.VirtualKey == Windows.System.VirtualKey.Left)
                     || (!typing && e.VirtualKey == Windows.System.VirtualKey.Back);
             if (back && !e.KeyStatus.WasKeyDown) e.Handled = TryGoBack();
+        }
+
+        static void OnKeyDown(object sender, KeyRoutedEventArgs e)
+        {
+            if (e.Key != Windows.System.VirtualKey.GamepadA) return;
+            var focused = FocusManager.GetFocusedElement();
+            if (focused is TextBox || focused is PasswordBox) ShowKeyboard();
+        }
+
+        /// <summary>Opens the on-screen keyboard (controller / touch) for the focused text field.</summary>
+        public static void ShowKeyboard()
+        {
+            try { CoreInputView.GetForCurrentView().TryShow(); }
+            catch (Exception) { /* no on-screen keyboard on this device */ }
         }
 
         void OnPointerPressed(CoreWindow sender, PointerEventArgs e)

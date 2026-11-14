@@ -13,12 +13,14 @@ namespace Silolux.Views
         public ConnectPage()
         {
             InitializeComponent();
+            // Focus once the page is in the tree; Keyboard focus is what a controller user
+            // sees (highlight) and what lets A open the on-screen keyboard.
+            Loaded += (s, e) => Address.Focus(FocusState.Keyboard);
         }
 
         protected override void OnNavigatedTo(NavigationEventArgs e)
         {
             Address.Text = AppSettings.ServerUrl ?? "";
-            Address.Focus(FocusState.Programmatic);
         }
 
         void Address_KeyDown(object sender, KeyRoutedEventArgs e)

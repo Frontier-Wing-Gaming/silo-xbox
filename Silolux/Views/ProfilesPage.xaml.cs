@@ -51,6 +51,11 @@ namespace Silolux.Views
             }
             var pin = new PasswordBox { PlaceholderText = "PIN", FontSize = 28, MaxLength = 12 };
             pin.InputScope = new InputScope { Names = { new InputScopeName(InputScopeNameValue.NumericPin) } };
+            // The dialog is a popup outside the page, so the app-wide A handler can't see it.
+            pin.AddHandler(KeyDownEvent, new KeyEventHandler((s, k) =>
+            {
+                if (k.Key == Windows.System.VirtualKey.GamepadA) App.ShowKeyboard();
+            }), true);
             var dialog = new ContentDialog
             {
                 Title = "Enter the PIN for " + p.Name,
