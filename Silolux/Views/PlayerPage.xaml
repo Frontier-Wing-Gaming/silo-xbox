@@ -23,6 +23,18 @@
             <ProgressRing x:Name="Busy" Width="64" Height="64" IsActive="True" />
             <TextBlock x:Name="Status" FontSize="{x:Bind services:Ui.PlayerStatusFontSize}" Margin="0,20,0,0" TextAlignment="Center" TextWrapping="Wrap" MaxWidth="{x:Bind services:Ui.PlayerStatusMaxWidth}" />
         </StackPanel>
+        <!-- Film time and skip help for a stream the server started mid-film (a remux): the player's own
+             seek bar can't show or seek those (no length), so PlayerPage seeks through the server. -->
+        <Border x:Name="SeekStrip" Visibility="Collapsed" Background="#CC000000" CornerRadius="6" Padding="16,8"
+                HorizontalAlignment="Stretch" VerticalAlignment="Top" Margin="{x:Bind services:Ui.PlayerHintMargin}" MaxWidth="900">
+            <StackPanel>
+                <Grid>
+                    <TextBlock x:Name="SeekClock" FontSize="{x:Bind services:Ui.PlayerHintFontSize}" HorizontalAlignment="Left" />
+                    <TextBlock x:Name="SeekHelp" FontSize="{x:Bind services:Ui.PlayerHintFontSize}" HorizontalAlignment="Right" Opacity="0.7" />
+                </Grid>
+                <ProgressBar x:Name="SeekProgress" Minimum="0" Maximum="1" Margin="0,6,0,0" />
+            </StackPanel>
+        </Border>
         <!-- Shown briefly when playback starts: how to reach the track picker. -->
         <Border x:Name="TracksHint" Visibility="Collapsed" Background="#CC000000" CornerRadius="6" Padding="12,6"
                 HorizontalAlignment="Right" VerticalAlignment="Top" Margin="{x:Bind services:Ui.PlayerHintMargin}">

@@ -52,6 +52,12 @@ namespace Silolux.Services
         public Uri StreamUrl => api.MediaUrl(Plan.Path("stream").Str("url"));
         public double PlayerStartSeconds => Plan.Path("timeline")?.Num("player_start_seconds") ?? 0;
         double Offset => Plan.Path("timeline")?.Num("timeline_offset_seconds") ?? 0;
+        /// <summary>False for a stream that starts mid-film (a server remux or transcode begun at the resume point).</summary>
+        public bool CanSeekAnywhere => Plan.Path("timeline")?.Bool("can_seek_anywhere", true) ?? true;
+        /// <summary>The earliest film position this stream holds; seeking before it needs a new stream.</summary>
+        public double SeekWindowStart => Plan.Path("timeline")?.Num("seek_window_start_seconds") ?? 0;
+        /// <summary>The film's length in seconds, or 0 when the plan doesn't say.</summary>
+        public double SourceDuration => Plan.Path("source")?.Num("duration_seconds") ?? 0;
         public double SourcePosition(double playerSeconds) => Math.Max(0, playerSeconds + Offset);
         public int? SelectedAudioIndex
         {
@@ -220,6 +226,16 @@ namespace Silolux.Services
                 QualityPreference = previous;
                 throw;
             }
+        }
+
+        /// <summary>
+        /// The viewer sought outside what this stream holds: a seek_reanchor replan for a stream
+        /// that starts at <paramref name="sourceSeconds"/> (film time), with the same tracks and quality.
+        /// </summary>
+        public async Task ReanchorAsync(double sourceSeconds)
+        {
+            var tracks = Plan.Obj("selected_tracks") ?? new JsonObject();
+            await ReplanAsync(ReplanBody("seek_reanchor", sourceSeconds - Offset, JsonObject.Parse(tracks.Stringify())));
         }
 
         JsonObject Tracks(int audioIndex, string subtitleTrackId)

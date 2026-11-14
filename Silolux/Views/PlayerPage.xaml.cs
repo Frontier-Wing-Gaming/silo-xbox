@@ -83,10 +83,12 @@ namespace Silolux.Views
                 // (A PC mouse only; the console's pointer stays off, see App.)
                 if (!Ui.Tv) Window.Current.CoreWindow.PointerCursor = null;
                 if (!pickerOpen) FocusSink.Focus(FocusState.Programmatic);
+                if (seekTarget == null) HideSeekStripLater();
             }
             else if (e.NewState?.Name == "ControlPanelFadeIn")
             {
                 RestorePointer();
+                ShowSeekStrip(true);
                 if (FocusManager.GetFocusedElement() == FocusSink) FocusControls();
             }
         }
@@ -95,6 +97,13 @@ namespace Silolux.Views
         void OnPreviewKeyDown(object sender, KeyRoutedEventArgs e)
         {
             if (FocusManager.GetFocusedElement() != FocusSink) return;
+            var skip = SkipFor(e.Key, true);
+            if (skip != 0 && ServerSeeking)
+            {
+                e.Handled = true;
+                Skip(skip);
+                return;
+            }
             switch (e.Key)
             {
                 case VirtualKey.GamepadA:
@@ -157,8 +166,38 @@ namespace Silolux.Views
                 Window.Current.CoreWindow.PointerCursor = new CoreCursor(CoreCursorType.Arrow, 0);
         }
 
+        /// <summary>Seconds a key skips: LB / RB anywhere, the D-pad and arrows only while the controls are hidden.</summary>
+        static double SkipFor(VirtualKey key, bool controlsHidden)
+        {
+            switch (key)
+            {
+                case VirtualKey.GamepadLeftShoulder: return -SkipBackSeconds;
+                case VirtualKey.GamepadRightShoulder: return SkipForwardSeconds;
+                case VirtualKey.Left:
+                case VirtualKey.GamepadDPadLeft:
+                case VirtualKey.GamepadLeftThumbstickLeft:
+                    return controlsHidden ? -SkipBackSeconds : 0;
+                case VirtualKey.Right:
+                case VirtualKey.GamepadDPadRight:
+                case VirtualKey.GamepadLeftThumbstickRight:
+                    return controlsHidden ? SkipForwardSeconds : 0;
+                default: return 0;
+            }
+        }
+
         void OnKeyDown(object sender, KeyRoutedEventArgs e)
         {
+            // LB / RB while the controls show (with them hidden, OnPreviewKeyDown has it).
+            if (!pickerOpen && ServerSeeking && FocusManager.GetFocusedElement() != FocusSink)
+            {
+                var skip = SkipFor(e.Key, false);
+                if (skip != 0)
+                {
+                    e.Handled = true;
+                    Skip(skip);
+                    return;
+                }
+            }
             if (e.Key == VirtualKey.GamepadMenu || e.Key == VirtualKey.GamepadView || e.Key == VirtualKey.T)
             {
                 e.Handled = true;
@@ -244,6 +283,7 @@ namespace Silolux.Views
             playbackItem = new MediaPlaybackItem(source, start);
             playbackItem.TimedMetadataTracksChanged += (s, a) => ApplySubtitleSelection();
             playbackItem.AudioTracksChanged += (s, a) => ApplyAudioSelection();
+            ApplySeekMode();
             player.Source = playbackItem;
         }
 
@@ -271,6 +311,7 @@ namespace Silolux.Views
             await Dispatcher.RunAsync(CoreDispatcherPriority.Normal, async () =>
             {
                 if (matchFromPlayer) await MatchDisplayFromPlayerAsync();
+                StartAtPlanPosition();
                 Overlay.Visibility = Visibility.Collapsed;
                 Busy.IsActive = false;
                 recovering = false;
@@ -425,6 +466,112 @@ namespace Silolux.Views
                     Fail(ex.Message);
                 }
             });
+        }
+
+        /// <summary>
+        /// Media Foundation ignores MediaPlaybackItem's start time for HLS (AdaptiveMediaSource) and
+        /// plays from the stream's first segment, so a resume started over and the clock read from 0.
+        /// Seek to the plan's start once the stream is open.
+        /// </summary>
+        void StartAtPlanPosition()
+        {
+            if (session == null || player == null) return;
+            var start = session.PlayerStartSeconds;
+            try
+            {
+                var ps = player.PlaybackSession;
+                if (start > 1 && ps.CanSeek && Math.Abs(ps.Position.TotalSeconds - start) > 1)
+                    ps.Position = TimeSpan.FromSeconds(start);
+            }
+            catch (Exception) { }
+        }
+
+        // Server seeking: a stream the server started mid-film (a remux; timeline can_seek_anywhere
+        // false) has no length, so Media Foundation's seek bar can't show or reach the film. Skips go
+        // to the server as seek_reanchor replans instead, and SeekStrip shows the film's own time.
+        const double SkipBackSeconds = 10;
+        const double SkipForwardSeconds = 30;
+        double? seekTarget;
+        int seekToken;
+        int stripToken;
+        DispatcherTimer clockTimer;
+
+        bool ServerSeeking => session != null && !session.CanSeekAnywhere;
+
+        /// <summary>Hides the player's own seek controls for a stream they can't handle.</summary>
+        void ApplySeekMode()
+        {
+            var own = ServerSeeking;
+            var c = Video.TransportControls;
+            c.IsSeekBarVisible = !own;
+            c.IsSeekEnabled = !own;
+            c.IsSkipForwardButtonVisible = !own;
+            c.IsSkipBackwardButtonVisible = !own;
+            c.IsFastForwardButtonVisible = !own;
+            c.IsFastRewindButtonVisible = !own;
+            SeekHelp.Text = Ui.Tv ? "\u25C0 \u25B6 or LB RB to skip" : "\u2190 \u2192 to skip";
+            if (!own) SeekStrip.Visibility = Visibility.Collapsed;
+        }
+
+        void ShowSeekStrip(bool stay)
+        {
+            if (!ServerSeeking || leaving) return;
+            SeekStrip.Visibility = Visibility.Visible;
+            UpdateClock();
+            if (clockTimer == null)
+            {
+                clockTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+                clockTimer.Tick += (s, e) => { if (SeekStrip.Visibility == Visibility.Visible) UpdateClock(); };
+            }
+            clockTimer.Start();
+            if (!stay) HideSeekStripLater();
+        }
+
+        async void HideSeekStripLater()
+        {
+            var token = ++stripToken;
+            await Task.Delay(3000);
+            if (token != stripToken || seekTarget != null) return;
+            // The controls keep it up while they show.
+            if (controlPanelStates?.CurrentState?.Name == "ControlPanelFadeIn") return;
+            SeekStrip.Visibility = Visibility.Collapsed;
+            clockTimer?.Stop();
+        }
+
+        void UpdateClock()
+        {
+            if (session == null) return;
+            var now = seekTarget ?? session.SourcePosition(CurrentPosition());
+            var length = session.SourceDuration;
+            SeekClock.Text = (seekTarget != null ? "\u2192 " : "") + Clock(now) + (length > 0 ? " / " + Clock(length) : "");
+            SeekProgress.Value = length > 0 ? Math.Min(1, now / length) : 0;
+        }
+
+        static string Clock(double seconds)
+        {
+            var t = TimeSpan.FromSeconds(Math.Max(0, Math.Floor(seconds)));
+            return t.TotalHours >= 1 ? t.ToString(@"h\:mm\:ss") : t.ToString(@"m\:ss");
+        }
+
+        /// <summary>
+        /// Moves the pending target by <paramref name="delta"/> seconds; once the presses stop, one
+        /// seek_reanchor replan loads a stream starting there.
+        /// </summary>
+        async void Skip(double delta)
+        {
+            if (!ServerSeeking || recovering || leaving) return;
+            var length = session.SourceDuration;
+            var target = (seekTarget ?? session.SourcePosition(CurrentPosition())) + delta;
+            if (length > 0) target = Math.Min(target, Math.Max(0, length - 5));
+            seekTarget = Math.Max(0, target);
+            ShowSeekStrip(true);
+            var token = ++seekToken;
+            await Task.Delay(900);
+            if (token != seekToken || seekTarget == null || leaving) return;
+            var at = seekTarget.Value;
+            seekTarget = null;
+            await ReloadAsync(_ => session.ReanchorAsync(at), "Seeking to " + Clock(at) + "\u2026");
+            HideSeekStripLater();
         }
 
         async void Player_MediaEnded(MediaPlayer sender, object args)
