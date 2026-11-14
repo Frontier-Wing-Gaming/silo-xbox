@@ -17,6 +17,7 @@ namespace Silolux
         public App()
         {
             InitializeComponent();
+            Ui.ApplyResources(Resources);
             FocusVisualKind = FocusVisualKind.Reveal;
             Suspending += OnSuspending;
         }

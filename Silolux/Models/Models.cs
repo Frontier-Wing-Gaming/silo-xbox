@@ -44,16 +44,17 @@ namespace Silolux.Models
 
             var duration = o.Obj("user_data")?.NumOrNull("duration_seconds") ?? o.Num("duration_seconds", o.Num("runtime") * 60);
             var pos = o.ResumeSeconds();
+            var width = (landscape ? 400 : 200) * Ui.CardScale;
             return new Card
             {
                 ContentId = o.Str("content_id"),
                 Type = type,
                 Title = isEpisode ? (o.Str("series_title") ?? o.Str("title")) : o.Str("title"),
                 Subtitle = subtitle,
-                Image = Img(image, landscape ? 400 : 200),
+                Image = Img(image, (int)(width * Ui.PixelsPerUnit)),
                 Progress = duration > 0 ? Math.Min(1, pos / duration) : 0,
-                Width = landscape ? 400 : 200,
-                Height = landscape ? 225 : 300,
+                Width = width,
+                Height = landscape ? width * 9 / 16 : width * 1.5,
             };
         }
     }
