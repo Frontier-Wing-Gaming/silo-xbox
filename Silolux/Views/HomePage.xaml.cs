@@ -56,7 +56,7 @@ namespace Silolux.Views
         {
             AppSettings.ProfileId = null;
             AppSettings.ProfileToken = null;
-            App.Restart(typeof(ProfilesPage));
+            App.Restart(typeof(ProfilesPage), ProfilesPage.Switching);
         }
     }
 }

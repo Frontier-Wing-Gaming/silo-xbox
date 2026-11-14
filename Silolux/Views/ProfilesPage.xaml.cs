@@ -11,6 +11,9 @@ namespace Silolux.Views
 {
     public sealed partial class ProfilesPage : Page
     {
+        /// <summary>Navigation parameter: the user asked to switch, so always show the picker.</summary>
+        public const string Switching = "switch";
+
         public ProfilesPage()
         {
             InitializeComponent();
@@ -23,7 +26,9 @@ namespace Silolux.Views
                 var r = await SiloClient.Current.ProfilesAsync();
                 var list = r.Objects("items").Select(Profile.From).ToList();
                 Profiles.ItemsSource = list;
-                if (list.Count == 1 && !list[0].HasPin)
+                // At startup a lone, unlocked profile is picked for the user; when they asked to
+                // switch, picking it again would bounce straight back to Home.
+                if (list.Count == 1 && !list[0].HasPin && !Switching.Equals(e.Parameter))
                 {
                     Choose(list[0].Id, null);
                     return;

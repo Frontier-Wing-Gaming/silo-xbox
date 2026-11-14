@@ -96,7 +96,7 @@ namespace Silolux.Models
                 Id = o.Str("id"),
                 Name = o.Str("name"),
                 HasPin = o.Bool("has_pin"),
-                Avatar = avatar == null ? null : new BitmapImage(avatar) { DecodePixelWidth = 200 },
+                Avatar = avatar == null ? null : new BitmapImage(avatar) { DecodePixelWidth = (int)(Ui.AvatarSize * Ui.PixelsPerUnit) },
             };
         }
     }

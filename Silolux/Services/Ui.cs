@@ -47,6 +47,15 @@ namespace Silolux.Services
         public static double EpisodeOverviewFontSize => Tv ? 13 : 18;
         public static Thickness EpisodeMargin => Tv ? new Thickness(0, 6, 0, 6) : new Thickness(0, 10, 0, 10);
 
+        // Profile picker.
+        public static double PageTitleFontSize => Tv ? 26 : 40;
+        public static double ProfileTileWidth => Tv ? 128 : 200;
+        public static double AvatarSize => Tv ? 96 : 160;
+        public static CornerRadius AvatarCorner => new CornerRadius(AvatarSize / 2);
+        public static double AvatarInitialFontSize => Tv ? 40 : 64;
+        public static double ProfileNameFontSize => Tv ? 15 : 22;
+        public static Thickness ProfileTileMargin => Tv ? new Thickness(8) : new Thickness(12);
+
         // Buttons (the shared button styles hold the PC values; a Style setter can't x:Bind).
         public static double ButtonFontSize => Tv ? 15 : 20;
         public static Thickness ButtonPadding => Tv ? new Thickness(18, 8, 18, 8) : new Thickness(28, 12, 28, 12);

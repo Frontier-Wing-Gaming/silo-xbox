@@ -3,22 +3,23 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:m="using:Silolux.Models"
+    xmlns:services="using:Silolux.Services"
     Background="{StaticResource SiloBackgroundBrush}">
     <Grid>
         <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-            <TextBlock Text="Who's watching?" Style="{StaticResource PageTitle}" HorizontalAlignment="Center" />
+            <TextBlock Text="Who's watching?" Style="{StaticResource PageTitle}" FontSize="{x:Bind services:Ui.PageTitleFontSize}" HorizontalAlignment="Center" />
             <GridView x:Name="Profiles" SelectionMode="None" IsItemClickEnabled="True" ItemClick="Profiles_ItemClick"
                       HorizontalAlignment="Center" XYFocusKeyboardNavigation="Enabled">
                 <GridView.ItemTemplate>
                     <DataTemplate x:DataType="m:Profile">
-                        <StackPanel Width="200" Margin="12">
-                            <Grid Width="160" Height="160" CornerRadius="80" Background="{StaticResource SiloPanelBrush}">
-                                <TextBlock Text="{x:Bind Initial}" FontSize="64" FontWeight="SemiBold"
+                        <StackPanel Width="{x:Bind services:Ui.ProfileTileWidth}" Margin="{x:Bind services:Ui.ProfileTileMargin}">
+                            <Grid Width="{x:Bind services:Ui.AvatarSize}" Height="{x:Bind services:Ui.AvatarSize}" CornerRadius="{x:Bind services:Ui.AvatarCorner}" Background="{StaticResource SiloPanelBrush}">
+                                <TextBlock Text="{x:Bind Initial}" FontSize="{x:Bind services:Ui.AvatarInitialFontSize}" FontWeight="SemiBold"
                                            HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 <Image Source="{x:Bind Avatar}" Stretch="UniformToFill" Visibility="{x:Bind AvatarVisibility}" />
                             </Grid>
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,14,0,0">
-                                <TextBlock Text="{x:Bind Name}" FontSize="22" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="{x:Bind Name}" FontSize="{x:Bind services:Ui.ProfileNameFontSize}" TextTrimming="CharacterEllipsis" />
                                 <FontIcon Glyph="&#xE72E;" FontSize="16" Margin="8,0,0,0" Visibility="{x:Bind LockVisibility}" />
                             </StackPanel>
                         </StackPanel>
