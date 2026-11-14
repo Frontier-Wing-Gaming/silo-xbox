@@ -59,6 +59,7 @@ namespace Silolux.Services
         /// <summary>The film's length in seconds, or 0 when the plan doesn't say.</summary>
         public double SourceDuration => Plan.Path("source")?.Num("duration_seconds") ?? 0;
         public double SourcePosition(double playerSeconds) => Math.Max(0, playerSeconds + Offset);
+        public double PlayerPosition(double sourceSeconds) => Math.Max(0, sourceSeconds - Offset);
         public int? SelectedAudioIndex
         {
             get

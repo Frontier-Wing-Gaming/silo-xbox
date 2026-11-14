@@ -4,7 +4,7 @@ A native Xbox (UWP, C#/XAML) client for [Silo](https://github.com/Silo-Server/si
 sign-in, profiles, home rows, movie and series pages, and playback through Media Foundation, all
 on Silo's native `/api/v2` and playback protocol v3. It also runs on Windows desktops.
 
-Status: early prototype, `0.1.1`.
+Status: early prototype, `0.2.0`.
 
 Silolux is an independent project by Frontier Wing Gaming. It is not made, endorsed or supported
 by Silo Media L.L.C.; "Silo" is their trademark and is used here only to say what this app connects to.
@@ -20,7 +20,7 @@ by Silo Media L.L.C.; "Silo" is their trademark and is used here only to say wha
 | Details | Movies and episodes get Resume / Play from start. Series get a season strip, an episode list, and Play next episode from `play_content_id`. |
 | Playback | `MediaPlayer` with `AdaptiveMediaSource` for HLS. Progress is sequenced every 10 s and on pause, with a stop on exit. A decode or network failure triggers a `failure_recovery` replan, up to 8 attempts. Play from start always starts at 0 (the server would otherwise resume). The server's audio pick is applied on original files. |
 | Subtitles | Sidecar text subtitles load as `TimedTextSource`. ASS/SSA tracks are fetched as WebVTT (the server converts by extension), since the console can't draw ASS styling anyway. |
-| Seeking | Media Foundation ignores a start time for HLS, so the app seeks to the plan's start once the stream opens (resume used to start over). A server remux (`can_seek_anywhere` false) has no length the player can seek in, so for those the app hides the seek bar and skip buttons, shows the film's time in a strip at the top, and skips itself: D-pad left/right with the controls hidden, or LB/RB, go 10 s back or 30 s forward, and each finished run of presses becomes one `seek_reanchor` replan. |
+| Seeking | D-pad left/right while the controls are hidden, or LB/RB at any time, skip 10 s back or 30 s forward, with the film's time in a strip at the top; the player's seek bar works as usual too. Media Foundation ignores a start time for HLS, so the app seeks to the plan's start once the stream opens. A server remux (`can_seek_anywhere` false) has no length the player can seek in: there the app hides the seek bar and skip buttons, and each run of skips becomes one `seek_reanchor` replan. |
 | Display | On Xbox the TV switches to a refresh rate that fits the film (24 Hz for 23.976/24 fps, 50 Hz for 25 fps; needs *Allow 24 Hz* in the console's video modes) and to HDR10 for HDR video, then back on exit. |
 | Quality | Away from the local network a short speed test is sent as `bandwidth_estimate_kbps`, so *auto* quality fits the connection. The player menu also lists the server's fixed quality rungs. |
 | Audio | When the server's progressive route would downmix 5.1+ audio the console can't decode (DTS, TrueHD) to stereo, and the console's audio output has more than two channels, the app asks for the HLS route, which keeps 5.1. |
@@ -38,7 +38,7 @@ Needs Visual Studio 2022 or later with the **Universal Windows Platform developm
 # Debug (deploys to this PC from Visual Studio: open Silolux\Silolux.csproj, F5)
 msbuild Silolux\Silolux.csproj /restore /p:Configuration=Debug /p:Platform=x64
 
-# Release (.NET Native), produces Silolux\AppPackages\...\Silolux_0.1.1.0_x64.msix
+# Release (.NET Native), produces Silolux\AppPackages\...\Silolux_0.2.0.0_x64.msix
 msbuild Silolux\Silolux.csproj /restore /p:Configuration=Release /p:Platform=x64
 ```
 

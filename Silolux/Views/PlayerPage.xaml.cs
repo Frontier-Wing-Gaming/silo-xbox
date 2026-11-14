@@ -88,7 +88,8 @@ namespace Silolux.Views
             else if (e.NewState?.Name == "ControlPanelFadeIn")
             {
                 RestorePointer();
-                ShowSeekStrip(true);
+                // With the player's own seek bar on screen the strip would repeat it.
+                if (ServerSeeking) ShowSeekStrip(true);
                 if (FocusManager.GetFocusedElement() == FocusSink) FocusControls();
             }
         }
@@ -98,7 +99,7 @@ namespace Silolux.Views
         {
             if (FocusManager.GetFocusedElement() != FocusSink) return;
             var skip = SkipFor(e.Key, true);
-            if (skip != 0 && ServerSeeking)
+            if (skip != 0 && CanSkip)
             {
                 e.Handled = true;
                 Skip(skip);
@@ -188,7 +189,7 @@ namespace Silolux.Views
         void OnKeyDown(object sender, KeyRoutedEventArgs e)
         {
             // LB / RB while the controls show (with them hidden, OnPreviewKeyDown has it).
-            if (!pickerOpen && ServerSeeking && FocusManager.GetFocusedElement() != FocusSink)
+            if (!pickerOpen && CanSkip && FocusManager.GetFocusedElement() != FocusSink)
             {
                 var skip = SkipFor(e.Key, false);
                 if (skip != 0)
@@ -486,9 +487,11 @@ namespace Silolux.Views
             catch (Exception) { }
         }
 
-        // Server seeking: a stream the server started mid-film (a remux; timeline can_seek_anywhere
-        // false) has no length, so Media Foundation's seek bar can't show or reach the film. Skips go
-        // to the server as seek_reanchor replans instead, and SeekStrip shows the film's own time.
+        // Skips: D-pad left / right with the controls hidden, LB / RB any time; SeekStrip shows the
+        // film's time. Most streams skip in the player. A stream the server started mid-film (a remux;
+        // timeline can_seek_anywhere false) has no length, so Media Foundation's seek bar can't show or
+        // reach the film: there skips go to the server as seek_reanchor replans, and the strip replaces
+        // the player's seek bar.
         const double SkipBackSeconds = 10;
         const double SkipForwardSeconds = 30;
         double? seekTarget;
@@ -497,6 +500,17 @@ namespace Silolux.Views
         DispatcherTimer clockTimer;
 
         bool ServerSeeking => session != null && !session.CanSeekAnywhere;
+
+        bool CanSkip
+        {
+            get
+            {
+                if (session == null || player == null) return false;
+                if (ServerSeeking) return true;
+                try { return player.PlaybackSession.CanSeek; }
+                catch (Exception) { return false; }
+            }
+        }
 
         /// <summary>Hides the player's own seek controls for a stream they can't handle.</summary>
         void ApplySeekMode()
@@ -515,7 +529,7 @@ namespace Silolux.Views
 
         void ShowSeekStrip(bool stay)
         {
-            if (!ServerSeeking || leaving) return;
+            if (session == null || leaving) return;
             SeekStrip.Visibility = Visibility.Visible;
             UpdateClock();
             if (clockTimer == null)
@@ -542,9 +556,22 @@ namespace Silolux.Views
         {
             if (session == null) return;
             var now = seekTarget ?? session.SourcePosition(CurrentPosition());
-            var length = session.SourceDuration;
+            var length = Length();
             SeekClock.Text = (seekTarget != null ? "\u2192 " : "") + Clock(now) + (length > 0 ? " / " + Clock(length) : "");
             SeekProgress.Value = length > 0 ? Math.Min(1, now / length) : 0;
+        }
+
+        /// <summary>The film's length: the plan's source duration, else what the player reports.</summary>
+        double Length()
+        {
+            var length = session?.SourceDuration ?? 0;
+            if (length > 0 || player == null) return length;
+            try
+            {
+                var d = player.PlaybackSession.NaturalDuration.TotalSeconds;
+                return d > 0 && d < 1e6 ? d : 0;
+            }
+            catch (Exception) { return 0; }
         }
 
         static string Clock(double seconds)
@@ -559,8 +586,23 @@ namespace Silolux.Views
         /// </summary>
         async void Skip(double delta)
         {
-            if (!ServerSeeking || recovering || leaving) return;
-            var length = session.SourceDuration;
+            if (!CanSkip || recovering || leaving) return;
+            var length = Length();
+            if (!ServerSeeking)
+            {
+                // The player holds the whole film: jump straight there.
+                try
+                {
+                    var to = session.SourcePosition(CurrentPosition()) + delta;
+                    if (length > 0) to = Math.Min(to, Math.Max(0, length - 5));
+                    to = Math.Max(0, to);
+                    player.PlaybackSession.Position = TimeSpan.FromSeconds(session.PlayerPosition(to));
+                    lastPosition = session.PlayerPosition(to);
+                }
+                catch (Exception) { }
+                ShowSeekStrip(false);
+                return;
+            }
             var target = (seekTarget ?? session.SourcePosition(CurrentPosition())) + delta;
             if (length > 0) target = Math.Min(target, Math.Max(0, length - 5));
             seekTarget = Math.Max(0, target);
