@@ -95,7 +95,10 @@ subject must be the manifest's `Publisher`, `CN=FrontierWingGaming`. On a PC, tr
    The Store signs it; the sideload certificate is not used. To build one locally, run the
    script, build with `/p:UapAppxPackageBuildMode=StoreUpload`, and don't commit the changed
    manifest.
-3. Run the Windows App Certification Kit on the package before submitting.
+3. Run the Windows App Certification Kit on the package before submitting, from an
+   administrator PowerShell: `scriptsun-wack.ps1 -Package <file>.msixupload`. It signs a
+   copy with a temporary certificate (the kit only installs signed packages), runs the kit,
+   lists failures, and removes the certificate and test install afterwards.
 
 Privacy policy URL for the listing:
 https://github.com/Frontier-Wing-Gaming/silo-xbox/blob/main/PRIVACY.md
