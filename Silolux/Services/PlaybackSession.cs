@@ -39,6 +39,8 @@ namespace Silolux.Services
         int attemptCount = 1;
         bool stopped;
         int bandwidthKbps;
+        // Off once KeepSurroundAsync moved this session to HLS; later replans keep that.
+        bool progressive = true;
         string[] features = PlaybackCapabilities.ClientFeatures;
 
         public string SessionId { get; private set; }
@@ -80,9 +82,23 @@ namespace Silolux.Services
                     TrackId = t.Str("track_id"),
                     Label = t.Str("label") ?? t.Str("language") ?? "Subtitles",
                     Language = t.Str("language") ?? "",
-                    Url = api.MediaUrl(t.Str("url")),
+                    Url = api.MediaUrl(codec == "ass" || codec == "ssa" ? AsWebVtt(t.Str("url")) : t.Str("url")),
                 };
             }
+        }
+
+        /// <summary>
+        /// The same subtitle as WebVTT: the server converts by extension (…/subtitles/0.ass → 0.vtt).
+        /// Styled ASS/SSA can't be styled here anyway, and the timed-text reader takes WebVTT reliably.
+        /// </summary>
+        static string AsWebVtt(string url)
+        {
+            if (string.IsNullOrEmpty(url)) return url;
+            var q = url.IndexOf('?');
+            var path = q < 0 ? url : url.Substring(0, q);
+            var dot = path.LastIndexOf('.');
+            if (dot < 0 || dot < path.LastIndexOf('/')) return url;
+            return path.Substring(0, dot) + ".vtt" + (q < 0 ? "" : url.Substring(q));
         }
 
         public static async Task<PlaybackSession> StartAsync(string fileId, double startPosition, bool pinFile)
@@ -116,7 +132,33 @@ namespace Silolux.Services
             s.AddBandwidth(body);
 
             s.Adopt(await s.api.StartPlaybackAsync(body));
+            await s.KeepSurroundAsync();
             return s;
+        }
+
+        /// <summary>
+        /// The server's progressive route converts audio the console can't decode (DTS, TrueHD) to
+        /// stereo AAC; its HLS route keeps 5.1. When that downmix would throw away channels the
+        /// console's output actually has, ask again without the progressive route.
+        /// </summary>
+        async Task KeepSurroundAsync()
+        {
+            if (!(Delivery ?? "").Contains("progressive")) return;
+            var source = Plan.Path("source")?.Num("audio_channels") ?? 0;
+            var sent = Plan.Path("effective_recipe")?.Num("audio_channels") ?? 0;
+            if (source <= 2 || sent <= 0 || sent > 2) return;
+            if (await PlaybackCapabilities.OutputChannelsAsync() <= 2) return;
+            progressive = false;
+            try
+            {
+                var tracks = Plan.Obj("selected_tracks") ?? new JsonObject();
+                await ReplanAsync(ReplanBody("track_change", PlayerStartSeconds, JsonObject.Parse(tracks.Stringify())));
+            }
+            catch (ApiException)
+            {
+                // Keep the stereo plan rather than fail playback.
+                progressive = true;
+            }
         }
 
         void Adopt(JsonObject decision)
@@ -235,7 +277,7 @@ namespace Silolux.Services
                 .With("metered", false)
                 .With("selected_tracks", selectedTracks)
                 .With("client_capabilities", PlaybackCapabilities.ClientCapabilities())
-                .With("client_playback_context", PlaybackCapabilities.PlaybackContext());
+                .With("client_playback_context", PlaybackCapabilities.PlaybackContext(progressive));
             AddBandwidth(body);
             return body;
         }

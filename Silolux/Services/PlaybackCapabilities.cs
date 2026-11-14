@@ -88,6 +88,32 @@ namespace Silolux.Services
             return ModesOfferHdr10();
         }
 
+        /// <summary>
+        /// Speaker channels the console mixes to (2 for stereo, 6 or 8 for 5.1 / 7.1 HDMI output);
+        /// 8 when a spatial format (Atmos / DTS:X for home theater) is active. 2 when unknown.
+        /// </summary>
+        public static async Task<int> OutputChannelsAsync()
+        {
+            try
+            {
+                var id = Windows.Media.Devices.MediaDevice.GetDefaultAudioRenderId(Windows.Media.Devices.AudioDeviceRole.Default);
+                var spatial = Windows.Media.Audio.SpatialAudioDeviceConfiguration.GetForDeviceId(id);
+                // No active format reads as the empty GUID rather than null.
+                Guid active;
+                if (Guid.TryParse(spatial.ActiveSpatialAudioFormat ?? "", out active) && active != Guid.Empty) return 8;
+            }
+            catch (Exception) { }
+            try
+            {
+                var result = await Windows.Media.Audio.AudioGraph.CreateAsync(
+                    new Windows.Media.Audio.AudioGraphSettings(Windows.Media.Render.AudioRenderCategory.Media));
+                if (result.Status == Windows.Media.Audio.AudioGraphCreationStatus.Success)
+                    using (var graph = result.Graph) return (int)graph.EncodingProperties.ChannelCount;
+            }
+            catch (Exception) { }
+            return 2;
+        }
+
         public static bool ModesOfferHdr10()
         {
             try
@@ -157,11 +183,13 @@ namespace Silolux.Services
             .With("hdr", hdr10)
             .With("hdr_details", Hdr(hdr10));
 
-        public static JsonObject PlaybackContext()
+        /// <param name="progressive">False takes the server's progressive route away: its audio
+        /// conversion (DTS, TrueHD, ...) always downmixes to stereo, while HLS keeps 5.1.</param>
+        public static JsonObject PlaybackContext(bool progressive = true)
         {
             var deliveries = new JsonObject()
                 .With("original_http", Delivery(new[] { "mp4", "mkv", "mov", "ts", "m2ts" }, hdr10))
-                .With("progressive", Delivery(new[] { "mp4", "mkv" }, hdr10))
+                .With("progressive", Delivery(new[] { "mp4", "mkv" }, hdr10).With("enabled", progressive))
                 .With("hls", Delivery(new[] { "hls" }, hdr10));
             var os = OsVersion();
             return new JsonObject()

@@ -633,7 +633,15 @@ namespace Silolux.Views
 
         static ListView MakeList(List<TrackChoice> items, int selected)
         {
-            var list = new ListView { SelectionMode = ListViewSelectionMode.Single, MaxHeight = Ui.DialogListMaxHeight };
+            // SingleSelectionFollowsFocus off: moving the D-pad down through a list to reach Apply
+            // must not select each row it passes (it used to leave the lowest quality picked).
+            // A / Enter selects the focused row.
+            var list = new ListView
+            {
+                SelectionMode = ListViewSelectionMode.Single,
+                SingleSelectionFollowsFocus = false,
+                MaxHeight = Ui.DialogListMaxHeight,
+            };
             foreach (var c in items)
                 list.Items.Add(new ListViewItem { Content = c.Label, Tag = c, FontSize = Ui.DialogItemFontSize });
             if (selected >= 0 && selected < items.Count) list.SelectedIndex = selected;

@@ -62,7 +62,7 @@ namespace Silolux.Views
                 {
                     await System.Threading.Tasks.Task.Delay(3000);
                     var now = hdmi.GetCurrentDisplayMode();
-                    result = "HDR10 switch accepted (now " + now.BitsPerPixel / 3 + "-bit, " + now.ColorSpace + ")";
+                    result = "HDR10 switch accepted (now " + Services.DisplayModeMatcher.BitsPerChannel(now) + "-bit, " + now.ColorSpace + ")";
                     await hdmi.SetDefaultDisplayModeAsync();
                 }
                 else

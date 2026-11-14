@@ -133,7 +133,7 @@ namespace Silolux.Services
                     var modes = hdmi.GetSupportedDisplayModes();
                     s.Add("Current mode", string.Format(CultureInfo.InvariantCulture, "{0}×{1} @ {2:0.###} Hz, {3}-bit, {4}",
                         current.ResolutionWidthInRawPixels, current.ResolutionHeightInRawPixels, current.RefreshRate,
-                        current.BitsPerPixel / 3, current.ColorSpace));
+                        DisplayModeMatcher.BitsPerChannel(current), current.ColorSpace));
                     var top = modes.OrderByDescending(m => m.ResolutionWidthInRawPixels * m.ResolutionHeightInRawPixels).First();
                     s.Add("Highest resolution", top.ResolutionWidthInRawPixels + "×" + top.ResolutionHeightInRawPixels);
                     var rates = modes.Where(m => m.ResolutionWidthInRawPixels == current.ResolutionWidthInRawPixels &&
@@ -159,7 +159,7 @@ namespace Silolux.Services
                     s.Add("Modes offered", modes.Count.ToString(CultureInfo.InvariantCulture), DiagState.Info);
                     var groups = modes
                         .GroupBy(m => string.Format(CultureInfo.InvariantCulture, "{0}×{1} {2}-bit {3} {4}{5}",
-                            m.ResolutionWidthInRawPixels, m.ResolutionHeightInRawPixels, m.BitsPerPixel / 3,
+                            m.ResolutionWidthInRawPixels, m.ResolutionHeightInRawPixels, DisplayModeMatcher.BitsPerChannel(m),
                             m.ColorSpace, m.PixelEncoding, m.IsSmpte2084Supported ? " HDR10" : ""))
                         .OrderByDescending(g => g.First().ResolutionWidthInRawPixels * g.First().ResolutionHeightInRawPixels)
                         .ThenBy(g => g.Key);

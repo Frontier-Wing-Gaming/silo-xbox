@@ -90,7 +90,14 @@ namespace Silolux.Services
 
         public static string Describe(HdmiDisplayMode m) => string.Format(System.Globalization.CultureInfo.InvariantCulture,
             "{0}×{1} @ {2:0.###} Hz, {3}-bit, {4}, {5}{6}", m.ResolutionWidthInRawPixels, m.ResolutionHeightInRawPixels,
-            m.RefreshRate, m.BitsPerPixel / 3, m.ColorSpace, m.PixelEncoding, m.IsSmpte2084Supported ? ", PQ" : "");
+            m.RefreshRate, BitsPerChannel(m), m.ColorSpace, m.PixelEncoding, m.IsSmpte2084Supported ? ", PQ" : "");
+
+        /// <summary>
+        /// Colour depth per channel. HDMI's YCbCr 4:2:2 always uses a 24-bit pixel carrying up to
+        /// 12 bits per channel; the other encodings report three channels' worth.
+        /// </summary>
+        public static int BitsPerChannel(HdmiDisplayMode m) =>
+            m.PixelEncoding == HdmiDisplayPixelEncoding.Ycc422 ? m.BitsPerPixel / 2 : m.BitsPerPixel / 3;
 
         /// <summary>Puts back the display mode the user chose in the console's settings.</summary>
         public async Task RestoreAsync()
