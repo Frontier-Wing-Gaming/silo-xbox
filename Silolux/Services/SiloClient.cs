@@ -268,6 +268,8 @@ namespace Silolux.Services
         public Task<JsonObject> HomeSectionsAsync() =>
             SendAsync(HttpMethod.Get, "/api/v2/home/sections?item_limit=20&poster_width=300&backdrop_width=1280");
 
+        public Task<JsonObject> UserLibrariesAsync() => GetAsync("/api/v2/user/libraries");
+
         public Task<JsonObject> ItemAsync(string id) =>
             GetAsync("/api/v2/catalog/items/" + Uri.EscapeDataString(id) + "?backdrop_width=1920&poster_width=400&logo_width=600");
 

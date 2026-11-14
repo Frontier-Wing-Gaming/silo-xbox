@@ -29,12 +29,22 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
         <Grid Padding="{x:Bind services:Ui.HomeHeaderPadding}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
             <TextBlock Text="Silolux" FontSize="{x:Bind services:Ui.HomeTitleFontSize}" FontWeight="SemiBold" VerticalAlignment="Center" />
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <!-- One button per library, filled from /api/v2/user/libraries. -->
+            <StackPanel x:Name="LibraryButtons" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="20,0,0,0" />
+            <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="SearchButton" Click="Search_Click" Margin="0,0,12,0" ToolTipService.ToolTip="Search">
+                    <SymbolIcon Symbol="Find" />
+                </Button>
                 <Button x:Name="RefreshButton" Click="Refresh_Click" Margin="0,0,12,0" ToolTipService.ToolTip="Refresh">
                     <SymbolIcon Symbol="Refresh" />
                 </Button>
-                <Button Content="Switch profile" FontSize="18" Click="SwitchProfile_Click" />
+                <Button Content="Switch profile" FontSize="{x:Bind services:Ui.ButtonFontSize}" Click="SwitchProfile_Click" />
             </StackPanel>
         </Grid>
 
