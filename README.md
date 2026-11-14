@@ -60,23 +60,52 @@ The suffix comes from the signing publisher; `Get-AppxPackage FrontierWingGaming
 
 1. Turn on **Developer Mode** on the console (Xbox Dev Mode app, one-time Partner Center
    developer account).
-2. Sign the package with a test certificate. Either set `AppxPackageSigningEnabled` to `true`
-   with a `PackageCertificateKeyFile`, or let Visual Studio create one under
-   *Package.appxmanifest → Packaging*.
-3. Deploy from Visual Studio (*Remote Machine*, the console's IP), or upload the `.msix` and its
-   dependencies in the Dev Home portal at `https://<xbox-ip>:11443`.
+2. Either deploy from Visual Studio (*Remote Machine*, the console's IP, authentication
+   *Universal (Unencrypted Protocol)*; pair with the PIN from Dev Home), or
+3. install a release package: download the zip from a GitHub release, open Device Portal at
+   `https://<xbox-ip>:11443`, choose *Add*, pick the `.msix`, then add the three packages in
+   `Dependencies\x64` when it asks for dependencies.
+
+The device sign-in code, controller keyboard and layout are sized for the console's
+960x540 layout (`Silolux/Services/Ui.cs` holds the TV sizes). If the app crashes, details
+land in the Visual Studio output (`Unhandled:`) and in `LocalState\crash.log`, which Device
+Portal's file explorer can open.
+
+## Releases
+
+Set the version in `Silolux/Package.appxmanifest` (`Identity Version`, such as `0.2.0.0`), then
+push a tag such as `v0.2.0`. The Release workflow builds a signed sideload package and
+attaches a zip (the `.msix`, its `.cer`, the runtime packages it needs, and Microsoft's
+install scripts) to a draft GitHub release for you to review and publish.
+
+Packages are signed with the certificate in the repository secrets `XBOX_SIGNING_PFX` (the
+`.pfx`, base64) and `XBOX_SIGNING_PASSWORD` when they exist, otherwise with a one-off
+self-signed certificate per run. Set the secrets so updates install over each other: a
+package signed with a different certificate has to be uninstalled first. The certificate's
+subject must be the manifest's `Publisher`, `CN=FrontierWingGaming`. On a PC, trust the
+`.cer` (Local Machine, Trusted People) before installing.
 
 Store publishing needs a Partner Center app reservation. Replace `Identity`, `Publisher` and
 `PhoneProductId` in `Package.appxmanifest` with the reserved values.
 
+## Playing
+
+- **Menu** or **View** on the controller (**T** on a keyboard) opens *Audio & subtitles*. A
+  new audio track asks the server for a new stream at the current position (a `track_change`
+  replan); subtitles switch locally between the text tracks the server attached.
+- **Search** and one button per video library sit in the home header.
+
 ## Known gaps
 
-- No search, library browsing beyond home rows, watch party, trailers, or subtitle and audio menus
-  (the transport controls show the tracks the stream exposes).
+- No watch party, trailers or collections.
+- Subtitle choices made in the player are not sent to the server, so the next title starts
+  with the server's default again. Audio choices are.
+- Image-based subtitles (PGS, VobSub) are not offered; they need the server to burn them in.
 - No seek re-anchor for server-anchored HLS timelines. Seeking works inside what the stream
   exposes.
 - A PIN profile's token is held in memory only, so a cold start returns to the profile picker.
-- Tested on Windows desktop against a local Docker Silo server; not yet on console hardware.
+- Tested on an Xbox in Developer Mode against a local Docker Silo server; not yet against a
+  remote or HTTPS server.
 
 ## License
 
