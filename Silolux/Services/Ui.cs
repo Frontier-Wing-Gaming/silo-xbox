@@ -26,5 +26,30 @@ namespace Silolux.Services
         // The system already keeps an Xbox app inside the TV-safe area; don't add a full PC margin on top.
         public static Thickness HomeHeaderPadding => Tv ? new Thickness(24, 12, 24, 0) : new Thickness(48, 24, 48, 0);
         public static Thickness HomeRowsPadding => Tv ? new Thickness(24, 0, 0, 24) : new Thickness(48, 0, 0, 48);
+
+        // Item (movie / show) page.
+        public static Thickness ItemPagePadding => Tv ? new Thickness(24, 16, 24, 24) : new Thickness(72, 48, 72, 48);
+        public static double ItemTitleFontSize => Tv ? 30 : 48;
+        public static double LogoMaxHeight => Tv ? 72 : 140;
+        public static double LogoMaxWidth => Tv ? 280 : 520;
+        public static Thickness LogoMargin => Tv ? new Thickness(0, 8, 0, 8) : new Thickness(0, 24, 0, 16);
+        public static double MetaFontSize => Tv ? 13 : 18;
+        public static double OverviewFontSize => Tv ? 14 : 20;
+        public static double OverviewMaxWidth => Tv ? 560 : 900;
+        public static Thickness OverviewMargin => Tv ? new Thickness(0, 10, 0, 0) : new Thickness(0, 20, 0, 0);
+        public static Thickness ActionsMargin => Tv ? new Thickness(0, 16, 0, 0) : new Thickness(0, 32, 0, 0);
+        public static Thickness SeriesMargin => Tv ? new Thickness(0, 20, 0, 0) : new Thickness(0, 40, 0, 0);
+        public static double SeasonFontSize => Tv ? 15 : 20;
+        public static double EpisodeStillWidth => Tv ? 176 : 288;
+        public static GridLength EpisodeStillColumn => new GridLength(EpisodeStillWidth);
+        public static double EpisodeStillHeight => EpisodeStillWidth * 9 / 16;
+        public static double EpisodeHeadingFontSize => Tv ? 16 : 22;
+        public static double EpisodeOverviewFontSize => Tv ? 13 : 18;
+        public static Thickness EpisodeMargin => Tv ? new Thickness(0, 6, 0, 6) : new Thickness(0, 10, 0, 10);
+
+        // Buttons (the shared button styles hold the PC values; a Style setter can't x:Bind).
+        public static double ButtonFontSize => Tv ? 15 : 20;
+        public static Thickness ButtonPadding => Tv ? new Thickness(18, 8, 18, 8) : new Thickness(28, 12, 28, 12);
+        public static double ButtonMinWidth => Tv ? 120 : 200;
     }
 }

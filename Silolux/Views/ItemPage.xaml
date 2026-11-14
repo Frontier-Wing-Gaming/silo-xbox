@@ -3,6 +3,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:m="using:Silolux.Models"
+    xmlns:services="using:Silolux.Services"
     Background="{StaticResource SiloBackgroundBrush}">
     <Grid>
         <Image x:Name="Backdrop" Stretch="UniformToFill" Opacity="0.35" />
@@ -16,19 +17,19 @@
             </Rectangle.Fill>
         </Rectangle>
 
-        <ScrollViewer VerticalScrollBarVisibility="Hidden" Padding="72,48,72,48">
+        <ScrollViewer VerticalScrollBarVisibility="Hidden" Padding="{x:Bind services:Ui.ItemPagePadding}">
             <StackPanel MaxWidth="1100" HorizontalAlignment="Left">
-                <Image x:Name="Logo" MaxHeight="140" MaxWidth="520" HorizontalAlignment="Left" Stretch="Uniform" Margin="0,24,0,16" />
-                <TextBlock x:Name="ItemTitle" FontSize="48" FontWeight="SemiBold" TextWrapping="Wrap" />
-                <TextBlock x:Name="Meta" Style="{StaticResource Muted}" Margin="0,8,0,0" />
-                <TextBlock x:Name="OverviewText" FontSize="20" TextWrapping="Wrap" MaxLines="6" Margin="0,20,0,0" MaxWidth="900" HorizontalAlignment="Left" />
+                <Image x:Name="Logo" MaxHeight="{x:Bind services:Ui.LogoMaxHeight}" MaxWidth="{x:Bind services:Ui.LogoMaxWidth}" HorizontalAlignment="Left" Stretch="Uniform" Margin="{x:Bind services:Ui.LogoMargin}" />
+                <TextBlock x:Name="ItemTitle" FontSize="{x:Bind services:Ui.ItemTitleFontSize}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                <TextBlock x:Name="Meta" Style="{StaticResource Muted}" FontSize="{x:Bind services:Ui.MetaFontSize}" Margin="0,8,0,0" />
+                <TextBlock x:Name="OverviewText" FontSize="{x:Bind services:Ui.OverviewFontSize}" TextWrapping="Wrap" MaxLines="6" Margin="{x:Bind services:Ui.OverviewMargin}" MaxWidth="{x:Bind services:Ui.OverviewMaxWidth}" HorizontalAlignment="Left" />
 
-                <StackPanel x:Name="Actions" Orientation="Horizontal" Margin="0,32,0,0">
-                    <Button x:Name="PlayButton" Style="{StaticResource PrimaryButton}" Click="Play_Click" Margin="0,0,16,0" />
-                    <Button x:Name="RestartButton" Content="Play from start" Style="{StaticResource SecondaryButton}" Click="Restart_Click" />
+                <StackPanel x:Name="Actions" Orientation="Horizontal" Margin="{x:Bind services:Ui.ActionsMargin}">
+                    <Button x:Name="PlayButton" Style="{StaticResource PrimaryButton}" FontSize="{x:Bind services:Ui.ButtonFontSize}" Padding="{x:Bind services:Ui.ButtonPadding}" MinWidth="{x:Bind services:Ui.ButtonMinWidth}" Click="Play_Click" Margin="0,0,16,0" />
+                    <Button x:Name="RestartButton" Content="Play from start" Style="{StaticResource SecondaryButton}" FontSize="{x:Bind services:Ui.ButtonFontSize}" Padding="{x:Bind services:Ui.ButtonPadding}" MinWidth="{x:Bind services:Ui.ButtonMinWidth}" Click="Restart_Click" />
                 </StackPanel>
 
-                <StackPanel x:Name="SeriesPanel" Visibility="Collapsed" Margin="0,40,0,0">
+                <StackPanel x:Name="SeriesPanel" Visibility="Collapsed" Margin="{x:Bind services:Ui.SeriesMargin}">
                     <ListView x:Name="Seasons" SelectionMode="Single" SelectionChanged="Seasons_SelectionChanged"
                               ScrollViewer.HorizontalScrollMode="Enabled" ScrollViewer.HorizontalScrollBarVisibility="Hidden"
                               ScrollViewer.VerticalScrollMode="Disabled">
@@ -39,19 +40,19 @@
                         </ListView.ItemsPanel>
                         <ListView.ItemTemplate>
                             <DataTemplate x:DataType="m:Season">
-                                <TextBlock Text="{x:Bind Title}" FontSize="20" Margin="12,6" />
+                                <TextBlock Text="{x:Bind Title}" FontSize="{x:Bind services:Ui.SeasonFontSize}" Margin="10,4" />
                             </DataTemplate>
                         </ListView.ItemTemplate>
                     </ListView>
                     <ListView x:Name="Episodes" SelectionMode="None" IsItemClickEnabled="True" ItemClick="Episode_ItemClick" Margin="0,16,0,0">
                         <ListView.ItemTemplate>
                             <DataTemplate x:DataType="m:Episode">
-                                <Grid Margin="0,10" ColumnSpacing="20">
+                                <Grid Margin="{x:Bind services:Ui.EpisodeMargin}" ColumnSpacing="16">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="288" />
+                                        <ColumnDefinition Width="{x:Bind services:Ui.EpisodeStillColumn}" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
-                                    <Grid Height="162" CornerRadius="8" Background="{StaticResource SiloPanelBrush}">
+                                    <Grid Height="{x:Bind services:Ui.EpisodeStillHeight}" CornerRadius="8" Background="{StaticResource SiloPanelBrush}">
                                         <Image Source="{x:Bind Still}" Stretch="UniformToFill" />
                                         <ProgressBar Value="{x:Bind Progress}" Maximum="1" VerticalAlignment="Bottom" Height="5"
                                                      Foreground="{StaticResource SiloAccentBrush}" Visibility="{x:Bind ProgressVisibility}" />
@@ -61,8 +62,8 @@
                                         </Border>
                                     </Grid>
                                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                        <TextBlock Text="{x:Bind Heading}" FontSize="22" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                                        <TextBlock Text="{x:Bind Overview}" Style="{StaticResource Muted}" MaxLines="3" Margin="0,6,0,0" />
+                                        <TextBlock Text="{x:Bind Heading}" FontSize="{x:Bind services:Ui.EpisodeHeadingFontSize}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{x:Bind Overview}" Style="{StaticResource Muted}" FontSize="{x:Bind services:Ui.EpisodeOverviewFontSize}" MaxLines="3" Margin="0,6,0,0" />
                                     </StackPanel>
                                 </Grid>
                             </DataTemplate>

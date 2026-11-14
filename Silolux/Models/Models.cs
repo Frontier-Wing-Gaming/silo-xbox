@@ -134,7 +134,7 @@ namespace Silolux.Models
                 FileId = user?.Str("last_file_id") ?? file?.Str("file_id"),
                 Heading = string.Format("{0}. {1}", o.Num("episode_number"), o.Str("title")),
                 Overview = o.Str("overview") ?? "",
-                Still = still == null ? null : new BitmapImage(still) { DecodePixelWidth = 320 },
+                Still = still == null ? null : new BitmapImage(still) { DecodePixelWidth = (int)(Ui.EpisodeStillWidth * Ui.PixelsPerUnit) },
                 Position = pos,
                 Progress = runtime > 0 ? Math.Min(1, pos / runtime) : 0,
                 Played = user?.Bool("played") ?? false,
