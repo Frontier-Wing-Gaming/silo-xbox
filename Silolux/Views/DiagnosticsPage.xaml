@@ -1,0 +1,43 @@
+<Page
+    x:Class="Silolux.Views.DiagnosticsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:services="using:Silolux.Services"
+    Background="{StaticResource SiloBackgroundBrush}">
+    <Grid Padding="{x:Bind services:Ui.HomeHeaderPadding}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel>
+                <TextBlock Text="Device diagnostics" FontSize="{x:Bind services:Ui.HomeTitleFontSize}" FontWeight="SemiBold" />
+                <TextBlock x:Name="Saved" Style="{StaticResource Muted}" FontSize="{x:Bind services:Ui.CardSubtitleFontSize}" TextWrapping="Wrap" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top">
+                <Button x:Name="CopyButton" Content="Copy report" FontSize="{x:Bind services:Ui.ButtonFontSize}" Margin="0,0,12,0" Click="Copy_Click" />
+                <Button x:Name="HdrButton" Content="Test HDR switch" FontSize="{x:Bind services:Ui.ButtonFontSize}" Margin="0,0,12,0" Click="Hdr_Click" />
+                <Button x:Name="RunButton" Content="Run again" FontSize="{x:Bind services:Ui.ButtonFontSize}" Click="Run_Click" />
+            </StackPanel>
+        </Grid>
+
+        <!-- Focusable so a controller can scroll it: D-pad / stick by line, triggers by page. -->
+        <ScrollViewer x:Name="Scroller" Grid.Row="1" IsTabStop="True" UseSystemFocusVisuals="False"
+                      VerticalScrollBarVisibility="Auto" KeyDown="Scroller_KeyDown" Padding="0,0,12,24">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel x:Name="LeftColumn" Margin="0,0,16,0" />
+                <StackPanel x:Name="RightColumn" Grid.Column="1" Margin="16,0,0,0" />
+                <ProgressRing x:Name="Busy" Grid.ColumnSpan="2" Width="48" Height="48" IsActive="True" Margin="0,80,0,0" VerticalAlignment="Top" />
+            </Grid>
+        </ScrollViewer>
+    </Grid>
+</Page>

@@ -57,10 +57,16 @@
     <Compile Include="Services\SiloClient.cs" />
     <Compile Include="Services\PlaybackCapabilities.cs" />
     <Compile Include="Services\PlaybackSession.cs" />
+    <Compile Include="Services\DisplayModeMatcher.cs" />
+    <Compile Include="Services\BandwidthEstimator.cs" />
     <Compile Include="Models\Models.cs" />
     <Compile Include="Views\BrowsePage.xaml.cs">
       <DependentUpon>BrowsePage.xaml</DependentUpon>
     </Compile>
+    <Compile Include="Views\DiagnosticsPage.xaml.cs">
+      <DependentUpon>DiagnosticsPage.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="Services\DeviceDiagnostics.cs" />
     <Compile Include="Views\ConnectPage.xaml.cs">
       <DependentUpon>ConnectPage.xaml</DependentUpon>
     </Compile>
@@ -102,6 +108,10 @@
       <SubType>Designer</SubType>
     </ApplicationDefinition>
     <Page Include="Views\BrowsePage.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="Views\DiagnosticsPage.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>

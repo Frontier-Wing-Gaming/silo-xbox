@@ -27,11 +27,19 @@ namespace Silolux.Services
     /// refresh (single flight), profile headers and URL resolution, so pages
     /// never handle credentials themselves.
     /// </summary>
+    public class BandwidthSample
+    {
+        public long Bytes;
+        public long DurationMs;
+        public int Kbps;
+        public bool LowerBound;
+    }
+
     public class SiloClient
     {
         public const string Platform = "xbox";
         public const string ClientName = "Silolux for Xbox";
-        public const string AppVersion = "0.1.0";
+        public const string AppVersion = "0.1.1";
 
         public static SiloClient Current { get; private set; }
 
@@ -165,6 +173,65 @@ namespace Silolux.Services
         }
 
         public Task<JsonObject> GetAsync(string path) => SendAsync(HttpMethod.Get, path);
+
+        /// <summary>
+        /// Times a download from /api/v2/playback/bandwidth-probe: up to <paramref name="maxBytes"/>
+        /// or <paramref name="maxTime"/>, measured from the first byte so the server's response
+        /// latency doesn't count as slowness. Null when the server refuses (429: probe limit) or fails.
+        /// </summary>
+        public async Task<BandwidthSample> ProbeBandwidthAsync(string probeUrl, int maxBytes, TimeSpan maxTime)
+        {
+            if (string.IsNullOrEmpty(accessToken)) await RefreshAsync(null);
+            // The server's advertised URL takes the media route, like the video will; only send the
+            // bearer to this server's own origin.
+            var url = Resolve(string.IsNullOrEmpty(probeUrl) ? "/api/v2/playback/bandwidth-probe" : probeUrl);
+            if (url == null || !SameOrigin(url)) url = Resolve("/api/v2/playback/bandwidth-probe");
+            var req = new HttpRequestMessage(HttpMethod.Get, new Uri(url.AbsoluteUri + (string.IsNullOrEmpty(url.Query) ? "?" : "&") + "size=" + maxBytes));
+            AddDeviceHeaders(req);
+            req.Headers["Authorization"] = "Bearer " + accessToken;
+            if (!string.IsNullOrEmpty(AppSettings.ProfileId)) req.Headers["X-Profile-Id"] = AppSettings.ProfileId;
+            try
+            {
+                using (var res = await http.SendRequestAsync(req, HttpCompletionOption.ResponseHeadersRead))
+                {
+                    if (!res.IsSuccessStatusCode) return null;
+                    using (var stream = await res.Content.ReadAsInputStreamAsync())
+                    {
+                        var buffer = new Windows.Storage.Streams.Buffer(256 * 1024);
+                        var clock = System.Diagnostics.Stopwatch.StartNew();
+                        long bytes = 0;
+                        var first = true;
+                        while (bytes < maxBytes && clock.Elapsed < maxTime)
+                        {
+                            var chunk = await stream.ReadAsync(buffer, buffer.Capacity, InputStreamOptions.Partial);
+                            if (chunk.Length == 0) break;
+                            if (first)
+                            {
+                                // Start timing once data flows; the first chunk only marks that point.
+                                first = false;
+                                clock.Restart();
+                                continue;
+                            }
+                            bytes += chunk.Length;
+                        }
+                        var ms = Math.Max(1, (long)clock.Elapsed.TotalMilliseconds);
+                        if (bytes < 256 * 1024) return null;
+                        return new BandwidthSample
+                        {
+                            Bytes = bytes,
+                            DurationMs = ms,
+                            Kbps = (int)Math.Min(int.MaxValue, bytes * 8 / ms),
+                            // Finished before the time ran out: the link can carry at least this much.
+                            LowerBound = clock.Elapsed < maxTime,
+                        };
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
 
         /// <summary>
         /// Rotates the refresh token. A caller holding a stale access token

@@ -30,19 +30,31 @@
         </Grid.RowDefinitions>
         <Grid Padding="{x:Bind services:Ui.HomeHeaderPadding}">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
             <TextBlock Text="Silolux" FontSize="{x:Bind services:Ui.HomeTitleFontSize}" FontWeight="SemiBold" VerticalAlignment="Center" />
-            <!-- One button per library, filled from /api/v2/user/libraries. -->
-            <StackPanel x:Name="LibraryButtons" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="20,0,0,0" />
-            <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right">
+            <!-- One button per library, filled from /api/v2/user/libraries. A server can have many, so they get
+                 their own full-width row that scrolls sideways: moving focus along it brings each one into view. -->
+            <ScrollViewer x:Name="LibraryScroller" Grid.Row="1" Grid.ColumnSpan="2" Margin="0,12,0,0" IsTabStop="False"
+                          HorizontalScrollMode="Enabled" HorizontalScrollBarVisibility="Auto"
+                          VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled">
+                <StackPanel x:Name="LibraryButtons" Orientation="Horizontal" Padding="0,0,0,6" />
+            </ScrollViewer>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
                 <Button x:Name="SearchButton" Click="Search_Click" Margin="0,0,12,0" ToolTipService.ToolTip="Search">
                     <SymbolIcon Symbol="Find" />
                 </Button>
                 <Button x:Name="RefreshButton" Click="Refresh_Click" Margin="0,0,12,0" ToolTipService.ToolTip="Refresh">
                     <SymbolIcon Symbol="Refresh" />
+                </Button>
+                <Button Click="Diagnostics_Click" Margin="0,0,12,0" ToolTipService.ToolTip="Device diagnostics"
+                        AutomationProperties.Name="Device diagnostics">
+                    <SymbolIcon Symbol="Repair" />
                 </Button>
                 <Button Content="Switch profile" FontSize="{x:Bind services:Ui.ButtonFontSize}" Click="SwitchProfile_Click" />
             </StackPanel>

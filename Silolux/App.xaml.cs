@@ -24,6 +24,9 @@ namespace Silolux
         public App()
         {
             InitializeComponent();
+            // Also set in App.xaml; set here too because the Xbox mouse-mode cursor still showed with
+            // only the XAML attribute. Controller focus navigation, not a pointer, drives this app.
+            RequiresPointerMode = ApplicationRequiresPointerMode.WhenRequested;
             UnhandledException += (s, e) => LogCrash(e.Exception, e.Message);
             FocusVisualKind = FocusVisualKind.Reveal;
             Suspending += OnSuspending;

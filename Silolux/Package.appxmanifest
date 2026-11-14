@@ -3,9 +3,10 @@
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:mp="http://schemas.microsoft.com/appx/2014/phone/manifest"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
-  IgnorableNamespaces="uap mp">
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap mp rescap">
 
-  <Identity Name="FrontierWingGaming.Silolux" Publisher="CN=FrontierWingGaming" Version="0.1.0.0" />
+  <Identity Name="FrontierWingGaming.Silolux" Publisher="CN=FrontierWingGaming" Version="0.1.1.0" />
 
   <mp:PhoneIdentity PhoneProductId="6e2c4a57-1d3b-4e7a-9c61-5a0f2b7d8e10" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
 
@@ -47,5 +48,8 @@
     <Capability Name="internetClient" />
     <!-- Self-hosted servers usually live on the home network. -->
     <Capability Name="privateNetworkClientServer" />
+    <!-- Xbox: unlocks 4K and HDR10 video playback (HDR display modes, 3.25 GB memory). Without it the
+         console offers the app SDR modes only. The app is closed when the user starts a game. -->
+    <rescap:Capability Name="hevcPlayback" />
   </Capabilities>
 </Package>

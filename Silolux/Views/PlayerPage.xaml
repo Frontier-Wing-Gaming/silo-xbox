@@ -13,6 +13,12 @@
                                         IsSkipBackwardButtonVisible="True" IsSkipBackwardEnabled="True" />
             </MediaPlayerElement.TransportControls>
         </MediaPlayerElement>
+        <!-- Holds focus while the transport controls are hidden: it draws no focus highlight, and
+             PlayerPage turns A / Space on it into play-pause and any other key into showing the controls. -->
+        <ContentControl x:Name="FocusSink" IsTabStop="True" UseSystemFocusVisuals="False" Width="1" Height="1"
+                        HorizontalAlignment="Left" VerticalAlignment="Top" AutomationProperties.Name="Video" />
+        <!-- Mid-playback buffering: without it a stall just looks like choppy video. -->
+        <ProgressRing x:Name="Stall" Width="56" Height="56" IsActive="False" HorizontalAlignment="Center" VerticalAlignment="Center" />
         <StackPanel x:Name="Overlay" HorizontalAlignment="Center" VerticalAlignment="Center">
             <ProgressRing x:Name="Busy" Width="64" Height="64" IsActive="True" />
             <TextBlock x:Name="Status" FontSize="{x:Bind services:Ui.PlayerStatusFontSize}" Margin="0,20,0,0" TextAlignment="Center" TextWrapping="Wrap" MaxWidth="{x:Bind services:Ui.PlayerStatusMaxWidth}" />

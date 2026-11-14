@@ -13,6 +13,7 @@ using Windows.UI.Core;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
 using Windows.UI.Xaml.Input;
+using Windows.UI.Xaml.Media;
 using Windows.UI.Xaml.Navigation;
 
 namespace Silolux.Views
@@ -43,6 +44,10 @@ namespace Silolux.Views
         JsonObject item;
         bool pickerOpen;
         bool hintShown;
+        VisualStateGroup controlPanelStates;
+        DisplayModeMatcher display;
+        // Set when neither the plan nor the catalog named a frame rate: read it from the opened video.
+        bool matchFromPlayer;
 
         public PlayerPage()
         {
@@ -50,6 +55,106 @@ namespace Silolux.Views
             // Menu / View on a controller, T on a keyboard: audio and subtitles. Registered with
             // handledEventsToo because the transport controls handle most keys themselves.
             AddHandler(KeyDownEvent, new KeyEventHandler(OnKeyDown), true);
+            PreviewKeyDown += OnPreviewKeyDown;
+            Video.TransportControls.Loaded += (s, e) => HookControlPanel();
+            Loaded += (s, e) => FocusSink.Focus(FocusState.Programmatic);
+        }
+
+        /// <summary>
+        /// Follows the transport controls' fade in and out through their template's visual states;
+        /// MediaTransportControls has no event for it.
+        /// </summary>
+        void HookControlPanel()
+        {
+            if (controlPanelStates != null) return;
+            var controls = Video.TransportControls;
+            var root = VisualTreeHelper.GetChildrenCount(controls) > 0 ? VisualTreeHelper.GetChild(controls, 0) as FrameworkElement : null;
+            if (root == null) return;
+            controlPanelStates = VisualStateManager.GetVisualStateGroups(root).FirstOrDefault(g => g.Name == "ControlPanelVisibilityStates");
+            if (controlPanelStates != null) controlPanelStates.CurrentStateChanged += ControlPanelStateChanged;
+        }
+
+        void ControlPanelStateChanged(object sender, VisualStateChangedEventArgs e)
+        {
+            if (leaving) return;
+            if (e.NewState?.Name == "ControlPanelFadeOut")
+            {
+                // No focus highlight or mouse pointer over the picture while the controls are away.
+                // (A PC mouse only; the console's pointer stays off, see App.)
+                if (!Ui.Tv) Window.Current.CoreWindow.PointerCursor = null;
+                if (!pickerOpen) FocusSink.Focus(FocusState.Programmatic);
+            }
+            else if (e.NewState?.Name == "ControlPanelFadeIn")
+            {
+                RestorePointer();
+                if (FocusManager.GetFocusedElement() == FocusSink) FocusControls();
+            }
+        }
+
+        /// <summary>Keys while the controls are hidden (focus on FocusSink): A / Space / Enter play or pause, others bring the controls back.</summary>
+        void OnPreviewKeyDown(object sender, KeyRoutedEventArgs e)
+        {
+            if (FocusManager.GetFocusedElement() != FocusSink) return;
+            switch (e.Key)
+            {
+                case VirtualKey.GamepadA:
+                case VirtualKey.Space:
+                case VirtualKey.Enter:
+                    e.Handled = true;
+                    if (!e.KeyStatus.WasKeyDown) TogglePause();
+                    break;
+                // The track picker and Back keep their usual handling.
+                case VirtualKey.GamepadMenu:
+                case VirtualKey.GamepadView:
+                case VirtualKey.T:
+                case VirtualKey.GamepadB:
+                case VirtualKey.Escape:
+                case VirtualKey.Back:
+                case VirtualKey.GoBack:
+                case VirtualKey.Menu:
+                    break;
+                default:
+                    e.Handled = true;
+                    Video.TransportControls.Show();
+                    // Already showing (e.g. paused): the fade-in won't fire, so move focus here.
+                    if (controlPanelStates?.CurrentState?.Name != "ControlPanelFadeOut") FocusControls();
+                    break;
+            }
+        }
+
+        void TogglePause()
+        {
+            if (player == null || recovering) return;
+            if (player.PlaybackSession.PlaybackState == MediaPlaybackState.Playing) player.Pause();
+            else player.Play();
+        }
+
+        /// <summary>Puts focus on the play / pause button, where the controls normally start.</summary>
+        void FocusControls()
+        {
+            var target = FindNamed(Video.TransportControls, "PlayPauseButton") as Control;
+            if (target == null || target.Visibility != Visibility.Visible)
+                target = FindNamed(Video.TransportControls, "PlayPauseButtonOnLeft") as Control;
+            if (target == null || !target.Focus(FocusState.Keyboard))
+                Video.TransportControls.Focus(FocusState.Keyboard);
+        }
+
+        static DependencyObject FindNamed(DependencyObject parent, string name)
+        {
+            for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+            {
+                var child = VisualTreeHelper.GetChild(parent, i);
+                if ((child as FrameworkElement)?.Name == name) return child;
+                var found = FindNamed(child, name);
+                if (found != null) return found;
+            }
+            return null;
+        }
+
+        static void RestorePointer()
+        {
+            if (!Ui.Tv && Window.Current.CoreWindow.PointerCursor == null)
+                Window.Current.CoreWindow.PointerCursor = new CoreCursor(CoreCursorType.Arrow, 0);
         }
 
         void OnKeyDown(object sender, KeyRoutedEventArgs e)
@@ -70,6 +175,14 @@ namespace Silolux.Views
             try
             {
                 session = await PlaybackSession.StartAsync(args.FileId, args.StartPosition, args.PinFile);
+                // Before the video loads, so the TV's resync blank falls on the loading screen.
+                await MatchDisplayAsync();
+                if (leaving)
+                {
+                    // Backed out while the TV was switching: OnNavigatedFrom's restore may have run first.
+                    if (display != null) await display.RestoreAsync();
+                    return;
+                }
                 player = new MediaPlayer { AutoPlay = true };
                 player.MediaOpened += Player_MediaOpened;
                 player.MediaFailed += Player_MediaFailed;
@@ -155,13 +268,137 @@ namespace Silolux.Views
 
         async void Player_MediaOpened(MediaPlayer sender, object args)
         {
-            await Dispatcher.RunAsync(CoreDispatcherPriority.Normal, () =>
+            await Dispatcher.RunAsync(CoreDispatcherPriority.Normal, async () =>
             {
+                if (matchFromPlayer) await MatchDisplayFromPlayerAsync();
                 Overlay.Visibility = Visibility.Collapsed;
                 Busy.IsActive = false;
                 recovering = false;
                 ShowHintOnce();
+                // A few seconds in, once the TV has settled into whatever mode playback gets.
+                await Task.Delay(6000);
+                if (!leaving) await WritePlaybackReportAsync();
             });
+        }
+
+        /// <summary>
+        /// LocalState\playback.txt: what the server sent, what the player decodes and what the TV is
+        /// showing, mid-playback. Diagnostics can't see this itself (opening it leaves the player).
+        /// </summary>
+        async Task WritePlaybackReportAsync()
+        {
+            try
+            {
+                var version = await PlayingVersionAsync(); // also loads item, for the title
+                var b = new System.Text.StringBuilder();
+                b.AppendLine("Last playback, " + DateTimeOffset.Now.ToString("u", System.Globalization.CultureInfo.InvariantCulture));
+                b.AppendLine("  Title: " + (item?.Str("title") ?? item?.Str("name") ?? args?.ContentId ?? "?"));
+                b.AppendLine("  Delivery: " + session.Delivery + (session.ActiveQuality != null ? " · quality " + session.ActiveQuality : ""));
+                var recipe = session.Plan.Path("effective_recipe");
+                if (recipe != null)
+                    foreach (var kv in recipe)
+                        if (kv.Value.ValueType != JsonValueType.Object && kv.Value.ValueType != JsonValueType.Array && kv.Value.ValueType != JsonValueType.Null)
+                            b.AppendLine("  Sent " + kv.Key + ": " + kv.Value.Stringify().Trim('"'));
+                var source = version?.Objects("video_tracks").FirstOrDefault();
+                if (source != null)
+                    b.AppendLine("  Source video: " + source.Str("codec") + " " + source.Num("width") + "×" + source.Num("height") +
+                                 " @ " + source.Str("frame_rate") + " fps, " + (source.Str("video_range_type") ?? "SDR"));
+                var props = playbackItem?.VideoTracks.FirstOrDefault()?.GetEncodingProperties();
+                // NaturalVideoWidth/Height: the frames actually decoded (HLS track properties hold a placeholder size).
+                var ps = player?.PlaybackSession;
+                if (props != null)
+                    b.AppendLine("  Decoding: " + props.Subtype + " " +
+                                 (ps != null && ps.NaturalVideoWidth > 0 ? ps.NaturalVideoWidth + "×" + ps.NaturalVideoHeight : props.Width + "×" + props.Height) +
+                                 (props.FrameRate.Denominator != 0 ? string.Format(System.Globalization.CultureInfo.InvariantCulture, " @ {0:0.###} fps",
+                                     (double)props.FrameRate.Numerator / props.FrameRate.Denominator) : ""));
+                b.AppendLine("  Display match: " + (display?.LastDecision ?? "not on this device"));
+                try
+                {
+                    var mode = Windows.Graphics.Display.Core.HdmiDisplayInformation.GetForCurrentView()?.GetCurrentDisplayMode();
+                    if (mode != null) b.AppendLine("  TV mode now: " + DisplayModeMatcher.Describe(mode));
+                }
+                catch (Exception) { }
+                try
+                {
+                    var color = Windows.Graphics.Display.DisplayInformation.GetForCurrentView().GetAdvancedColorInfo();
+                    b.AppendLine("  TV colour now: " + color.CurrentAdvancedColorKind);
+                }
+                catch (Exception) { }
+                var file = await Windows.Storage.ApplicationData.Current.LocalFolder.CreateFileAsync("playback.txt",
+                    Windows.Storage.CreationCollisionOption.ReplaceExisting);
+                await Windows.Storage.FileIO.WriteTextAsync(file, b.ToString());
+            }
+            catch (Exception) { }
+        }
+
+        /// <summary>
+        /// Sets the TV's refresh rate (and HDR) for this video on Xbox; see DisplayModeMatcher. The frame
+        /// rate comes from what the server actually sends (the plan's recipe, which reflects a transcode),
+        /// else the catalog's description of the file, else the player once the video has opened.
+        /// </summary>
+        async Task MatchDisplayAsync()
+        {
+            display = DisplayModeMatcher.Create();
+            if (display == null) return;
+
+            var recipe = session.Plan.Path("effective_recipe");
+            var rate = recipe?.Num("frame_rate") ?? 0;
+            var range = recipe?.Str("dynamic_range");
+            if (rate <= 0 || string.IsNullOrEmpty(range))
+            {
+                var version = await PlayingVersionAsync();
+                var video = version?.Objects("video_tracks").FirstOrDefault();
+                if (rate <= 0) rate = ParseRate(video?.Str("frame_rate"));
+                if (string.IsNullOrEmpty(range))
+                    range = video?.Str("video_range_type") ?? (version != null && version.Bool("hdr") ? "hdr10" : null);
+            }
+
+            if (rate <= 0)
+            {
+                matchFromPlayer = true;
+                return;
+            }
+            await display.MatchAsync(rate, IsHdr(range));
+        }
+
+        /// <summary>The fallback when nothing described the video: pause, switch, resume.</summary>
+        async Task MatchDisplayFromPlayerAsync()
+        {
+            matchFromPlayer = false;
+            var props = playbackItem?.VideoTracks.FirstOrDefault()?.GetEncodingProperties();
+            if (props == null || props.FrameRate.Denominator == 0 || props.FrameRate.Numerator == 0) return;
+            var rate = (double)props.FrameRate.Numerator / props.FrameRate.Denominator;
+            var range = session.Plan.Path("effective_recipe")?.Str("dynamic_range");
+            player.Pause();
+            await display.MatchAsync(rate, IsHdr(range));
+            if (!leaving) player.Play();
+        }
+
+        static double ParseRate(string text)
+        {
+            double rate;
+            return double.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out rate) ? rate : 0;
+        }
+
+        /// <summary>HDR10 / HDR10+ / Dolby Vision are sent as PQ; SDR and HLG are not.</summary>
+        static bool IsHdr(string range)
+        {
+            if (string.IsNullOrEmpty(range)) return false;
+            range = range.ToLowerInvariant();
+            return !range.Contains("sdr") && !range.Contains("hlg")
+                && (range.Contains("hdr") || range.Contains("pq") || range.Contains("2084") || range.Contains("dolby") || range.Contains("dovi") || range.Contains("dv"));
+        }
+
+        /// <summary>The catalog's entry for the file being played (the plan describes only the stream).</summary>
+        async Task<JsonObject> PlayingVersionAsync()
+        {
+            if (item == null && !string.IsNullOrEmpty(args?.ContentId))
+            {
+                try { item = await SiloClient.Current.ItemAsync(args.ContentId); }
+                catch (ApiException) { }
+            }
+            var versions = item?.Objects("versions").ToList() ?? new List<JsonObject>();
+            return versions.FirstOrDefault(v => v.Str("file_id") == session.EffectiveFileId) ?? versions.FirstOrDefault();
         }
 
         async void Player_MediaFailed(MediaPlayer sender, MediaPlayerFailedEventArgs args)
@@ -200,10 +437,44 @@ namespace Silolux.Views
 
         async void PlaybackStateChanged(MediaPlaybackSession sender, object args)
         {
-            // Report pause and resume right away rather than at the next tick.
             var state = sender.PlaybackState;
+            await Dispatcher.RunAsync(CoreDispatcherPriority.Normal, () => ShowStall(state == MediaPlaybackState.Buffering));
+            // Report pause and resume right away rather than at the next tick.
             if (state == MediaPlaybackState.Paused || state == MediaPlaybackState.Playing)
                 await Dispatcher.RunAsync(CoreDispatcherPriority.Low, async () => await ReportAsync());
+        }
+
+        readonly List<DateTimeOffset> stalls = new List<DateTimeOffset>();
+        bool stallHintShown;
+        int stallToken;
+
+        /// <summary>
+        /// Shows the buffering ring for stalls after the video has started (the loading overlay covers
+        /// the first one). After three stalls in two minutes, points at the quality setting once.
+        /// </summary>
+        async void ShowStall(bool buffering)
+        {
+            var token = ++stallToken;
+            if (!buffering || leaving || recovering || Overlay.Visibility == Visibility.Visible)
+            {
+                Stall.IsActive = false;
+                return;
+            }
+            // Brief hiccups (a seek landing) don't need a ring.
+            await Task.Delay(400);
+            if (token != stallToken) return;
+            Stall.IsActive = true;
+
+            var now = DateTimeOffset.UtcNow;
+            stalls.Add(now);
+            stalls.RemoveAll(t => now - t > TimeSpan.FromMinutes(2));
+            if (stalls.Count >= 3 && !stallHintShown && session != null && session.AvailableQualities().Any())
+            {
+                stallHintShown = true;
+                // The cached speed was too optimistic: measure again for the next title.
+                BandwidthEstimator.Forget();
+                ShowHint((Ui.Tv ? "☰" : "T") + "  Buffering? Choose a lower quality", 8000);
+            }
         }
 
         double CurrentPosition()
@@ -229,14 +500,22 @@ namespace Silolux.Views
             }
         }
 
-        async void ShowHintOnce()
+        void ShowHintOnce()
         {
             if (hintShown) return;
             hintShown = true;
-            TracksHintText.Text = Ui.Tv ? "\u2630  Audio & subtitles" : "T  Audio & subtitles";
+            ShowHint((Ui.Tv ? "\u2630" : "T") + "  Audio, subtitles & quality", 5000);
+        }
+
+        int hintToken;
+
+        async void ShowHint(string text, int milliseconds)
+        {
+            var token = ++hintToken;
+            TracksHintText.Text = text;
             TracksHint.Visibility = Visibility.Visible;
-            await Task.Delay(5000);
-            TracksHint.Visibility = Visibility.Collapsed;
+            await Task.Delay(milliseconds);
+            if (token == hintToken) TracksHint.Visibility = Visibility.Collapsed;
         }
 
         class TrackChoice
@@ -244,18 +523,15 @@ namespace Silolux.Views
             public string Label;
             public int AudioIndex = -1;
             public string SubtitleId;
+            public string Quality;
         }
+
+        static string Mbps(int kbps) => (kbps / 1000.0).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " Mbps";
 
         /// <summary>Audio tracks of the file playing, from the catalog (the plan names only the selected one).</summary>
         async Task<List<TrackChoice>> AudioChoicesAsync()
         {
-            if (item == null && !string.IsNullOrEmpty(args?.ContentId))
-            {
-                try { item = await SiloClient.Current.ItemAsync(args.ContentId); }
-                catch (ApiException) { }
-            }
-            var versions = item?.Objects("versions").ToList() ?? new List<JsonObject>();
-            var file = versions.FirstOrDefault(v => v.Str("file_id") == session.EffectiveFileId) ?? versions.FirstOrDefault();
+            var file = await PlayingVersionAsync();
             var list = new List<TrackChoice>();
             var i = 0;
             foreach (var t in file?.Objects("audio_tracks") ?? Enumerable.Empty<JsonObject>())
@@ -293,9 +569,19 @@ namespace Silolux.Views
                 subs.AddRange(session.SidecarSubtitles().Where(s => s.TrackId != null)
                     .Select(s => new TrackChoice { Label = s.Label, SubtitleId = s.TrackId }));
 
+                // "Auto" is the server's choice: the original when the measured connection carries it.
+                var qualities = new List<TrackChoice> { new TrackChoice { Label = "Auto (best your connection carries)", Quality = "auto" } };
+                qualities.AddRange(session.AvailableQualities().Select(q => new TrackChoice
+                {
+                    Label = q.Kbps > 0 ? q.Name + "  ·  " + Mbps(q.Kbps) : q.Name,
+                    Quality = q.Label,
+                }));
+                var currentQuality = session.QualityPreference;
+
                 var currentAudio = session.SelectedAudioIndex ?? 0;
                 var audioList = MakeList(audio, audio.FindIndex(a => a.AudioIndex == currentAudio));
                 var subList = MakeList(subs, Math.Max(0, subs.FindIndex(s => s.SubtitleId == currentSubtitleId)));
+                var qualityList = MakeList(qualities, Math.Max(0, qualities.FindIndex(q => q.Quality == currentQuality)));
 
                 var panel = new StackPanel();
                 panel.Children.Add(Heading("Audio"));
@@ -303,10 +589,15 @@ namespace Silolux.Views
                 else panel.Children.Add(new TextBlock { Text = "No audio track list for this title.", FontSize = Ui.DialogItemFontSize });
                 panel.Children.Add(Heading("Subtitles"));
                 panel.Children.Add(subList);
+                if (qualities.Count > 1)
+                {
+                    panel.Children.Add(Heading("Quality"));
+                    panel.Children.Add(qualityList);
+                }
 
                 var dialog = new ContentDialog
                 {
-                    Title = "Audio & subtitles",
+                    Title = "Audio, subtitles & quality",
                     Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto },
                     PrimaryButtonText = "Apply",
                     CloseButtonText = "Cancel",
@@ -316,8 +607,13 @@ namespace Silolux.Views
 
                 var pickedAudio = Picked(audioList);
                 var pickedSub = Picked(subList)?.SubtitleId;
-                if (pickedAudio != null && pickedAudio.AudioIndex != currentAudio)
-                    await ChangeAudioAsync(pickedAudio.AudioIndex, pickedSub);
+                var pickedQuality = Picked(qualityList)?.Quality ?? currentQuality;
+                var audioIndex = pickedAudio?.AudioIndex ?? currentAudio;
+                // A quality change carries the picked tracks with it, so it covers an audio change too.
+                if (pickedQuality != currentQuality)
+                    await ReloadAsync(p => session.ChangeQualityAsync(pickedQuality, audioIndex, pickedSub, p), "Switching quality…");
+                else if (audioIndex != currentAudio)
+                    await ReloadAsync(p => session.ChangeTracksAsync(audioIndex, pickedSub, p), "Switching audio…");
                 else if (pickedSub != currentSubtitleId)
                     ShowSubtitle(pickedSub);
             }
@@ -361,17 +657,22 @@ namespace Silolux.Views
             currentSubtitleId = wanted != null ? trackId : null;
         }
 
-        /// <summary>Audio needs a new stream for remuxes and transcodes: ask the server, then reload.</summary>
-        async Task ChangeAudioAsync(int audioIndex, string subtitleId)
+        /// <summary>
+        /// Audio and quality changes need a new stream: ask the server for a plan at the current
+        /// position (<paramref name="replan"/> gets it), then load that plan.
+        /// </summary>
+        async Task ReloadAsync(Func<double, Task> replan, string message)
         {
             var position = CurrentPosition();
             recovering = true;
+            Stall.IsActive = false;
             Overlay.Visibility = Visibility.Visible;
             Busy.IsActive = true;
-            Status.Text = "Switching audio\u2026";
+            Status.Text = message;
             try
             {
-                await session.ChangeTracksAsync(audioIndex, subtitleId, position);
+                await replan(position);
+                stalls.Clear();
                 await LoadPlanAsync();
             }
             catch (ApiException ex)
@@ -392,6 +693,8 @@ namespace Silolux.Views
         {
             leaving = true;
             timer?.Stop();
+            if (controlPanelStates != null) controlPanelStates.CurrentStateChanged -= ControlPanelStateChanged;
+            RestorePointer();
             var position = CurrentPosition();
             keepAwake?.RequestRelease();
             keepAwake = null;
@@ -404,6 +707,7 @@ namespace Silolux.Views
                 player.Dispose();
                 player = null;
             }
+            if (display != null) await display.RestoreAsync();
             if (session != null) await session.StopAsync(position);
         }
     }

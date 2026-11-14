@@ -57,13 +57,14 @@ namespace Silolux.Views
                 foreach (var lib in r.Objects("items"))
                 {
                     var type = lib.Str("type") ?? "";
-                    if (type != "movies" && type != "tv" && type != "mixed" && type != "videos") continue;
+                    // "series" is the API's name for TV libraries; older servers report "tv".
+                    if (type != "movies" && type != "series" && type != "tv" && type != "mixed" && type != "videos") continue;
                     var args = new BrowseArgs { LibraryId = lib.Str("id"), Name = lib.Str("name") };
                     var button = new Button
                     {
                         Content = args.Name,
                         FontSize = Ui.ButtonFontSize,
-                        Margin = new Thickness(0, 0, 8, 0),
+                        Margin = new Thickness(0, 0, 10, 0),
                     };
                     button.Click += (s, e) => Frame.Navigate(typeof(BrowsePage), args);
                     LibraryButtons.Children.Add(button);
@@ -73,9 +74,12 @@ namespace Silolux.Views
             {
                 // The rows still work without the shortcuts.
             }
+            LibraryScroller.Visibility = LibraryButtons.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         }
 
         void Search_Click(object sender, RoutedEventArgs e) => Frame.Navigate(typeof(BrowsePage), new BrowseArgs());
+
+        void Diagnostics_Click(object sender, RoutedEventArgs e) => Frame.Navigate(typeof(DiagnosticsPage));
 
         void Card_ItemClick(object sender, ItemClickEventArgs e)
         {

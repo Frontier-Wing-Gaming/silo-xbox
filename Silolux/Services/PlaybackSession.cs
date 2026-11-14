@@ -14,6 +14,13 @@ namespace Silolux.Services
         public Uri Url;
     }
 
+    public class QualityOption
+    {
+        public string Label;
+        public string Name;
+        public int Kbps;
+    }
+
     /// <summary>
     /// One playback attempt under protocol v3: start, failure replans,
     /// sequenced progress and the stop. The plan's URLs and timeline are
@@ -31,6 +38,8 @@ namespace Silolux.Services
         long sequence;
         int attemptCount = 1;
         bool stopped;
+        int bandwidthKbps;
+        string[] features = PlaybackCapabilities.ClientFeatures;
 
         public string SessionId { get; private set; }
         public JsonObject Plan { get; private set; }
@@ -83,11 +92,16 @@ namespace Silolux.Services
             var caps = await s.api.PlaybackCapabilitiesAsync();
             if (!caps.Bool("allowed", true)) throw new ApiException(0, "not_configured", "Playback is not set up on this server.");
             s.installationId = caps.Str("installation_id");
+            // Bandwidth planning is opt-in: the server rejects its fields from clients that don't declare it.
+            s.features = BandwidthEstimator.Supported(caps)
+                ? PlaybackCapabilities.ClientFeatures.Concat(new[] { BandwidthEstimator.Feature }).ToArray()
+                : PlaybackCapabilities.ClientFeatures;
+            s.bandwidthKbps = await BandwidthEstimator.EstimateAsync(s.api, caps);
 
             var body = new JsonObject()
                 .With("installation_id", s.installationId)
                 .With("protocol_version", 3)
-                .With("client_features", Json.Strings(PlaybackCapabilities.ClientFeatures))
+                .With("client_features", Json.Strings(s.features))
                 .With("file_id", fileId)
                 .With("profile_id", AppSettings.ProfileId)
                 .With("playback_attempt_id", s.attemptId)
@@ -97,6 +111,7 @@ namespace Silolux.Services
                 .With("client_playback_context", PlaybackCapabilities.PlaybackContext());
             if (startPosition > 0) body.With("start_position", startPosition);
             if (pinFile) body.With("allow_alternate_versions", false);
+            s.AddBandwidth(body);
 
             s.Adopt(await s.api.StartPlaybackAsync(body));
             return s;
@@ -141,22 +156,70 @@ namespace Silolux.Services
         /// </summary>
         public async Task ChangeTracksAsync(int audioIndex, string subtitleTrackId, double playerSeconds)
         {
+            await ReplanAsync(ReplanBody("track_change", playerSeconds, Tracks(audioIndex, subtitleTrackId)));
+        }
+
+        /// <summary>
+        /// The viewer picked a quality: "auto" (the original when the connection carries it) or an
+        /// available_qualities label. Kept for later replans, which would otherwise fall back to auto.
+        /// </summary>
+        public async Task ChangeQualityAsync(string preference, int audioIndex, string subtitleTrackId, double playerSeconds)
+        {
+            var previous = QualityPreference;
+            QualityPreference = string.IsNullOrEmpty(preference) ? "auto" : preference;
+            try
+            {
+                await ReplanAsync(ReplanBody("quality_change", playerSeconds, Tracks(audioIndex, subtitleTrackId)));
+            }
+            catch
+            {
+                QualityPreference = previous;
+                throw;
+            }
+        }
+
+        JsonObject Tracks(int audioIndex, string subtitleTrackId)
+        {
             var tracks = new JsonObject().With("audio", new JsonObject()
                 .With("id", AudioTrackId(audioIndex))
                 .With("index", audioIndex));
             if (!string.IsNullOrEmpty(subtitleTrackId))
                 tracks.With("subtitle", new JsonObject().With("id", subtitleTrackId));
-            await ReplanAsync(ReplanBody("track_change", playerSeconds, tracks));
+            return tracks;
+        }
+
+        /// <summary>"auto" or the available_qualities label the viewer chose.</summary>
+        public string QualityPreference { get; private set; } = "auto";
+
+        /// <summary>The rung this plan delivers; null for the original or an encode between rungs.</summary>
+        public string ActiveQuality => Plan.Str("active_quality");
+
+        /// <summary>Fixed quality rungs this title offers, in menu order (the original isn't listed).</summary>
+        public IEnumerable<QualityOption> AvailableQualities() =>
+            Plan.Objects("available_qualities")
+                .Select(q => new QualityOption
+                {
+                    Label = q.Str("label"),
+                    Name = q.Str("display_name") ?? q.Str("label"),
+                    Kbps = (int)q.Num("bitrate_kbps"),
+                })
+                .Where(q => !string.IsNullOrEmpty(q.Label));
+
+        /// <summary>The measured connection speed, when there is one (see BandwidthEstimator).</summary>
+        void AddBandwidth(JsonObject body)
+        {
+            if (bandwidthKbps <= 0) return;
+            body.With("bandwidth_estimate_kbps", bandwidthKbps).With("bandwidth_estimate_source", "probe");
         }
 
         JsonObject ReplanBody(string operation, double playerSeconds, JsonObject selectedTracks)
         {
             var keys = new JsonArray();
             foreach (var k in attemptedKeys.Skip(Math.Max(0, attemptedKeys.Count - 16))) keys.Add(JsonValue.CreateStringValue(k));
-            return new JsonObject()
+            var body = new JsonObject()
                 .With("installation_id", installationId)
                 .With("protocol_version", 3)
-                .With("client_features", Json.Strings(PlaybackCapabilities.ClientFeatures))
+                .With("client_features", Json.Strings(features))
                 .With("operation", operation)
                 .With("playback_attempt_id", attemptId)
                 .With("replan_request_id", Guid.NewGuid().ToString("D"))
@@ -165,12 +228,14 @@ namespace Silolux.Services
                 .With("plan_attempt_key", Plan.Str("plan_attempt_key"))
                 .With("attempted_plan_keys", keys)
                 .With("attempt_count", attemptCount)
-                .With("quality_preference", "auto")
+                .With("quality_preference", QualityPreference)
                 .With("position_seconds", SourcePosition(playerSeconds))
                 .With("metered", false)
                 .With("selected_tracks", selectedTracks)
                 .With("client_capabilities", PlaybackCapabilities.ClientCapabilities())
                 .With("client_playback_context", PlaybackCapabilities.PlaybackContext());
+            AddBandwidth(body);
+            return body;
         }
 
         async Task ReplanAsync(JsonObject body)
