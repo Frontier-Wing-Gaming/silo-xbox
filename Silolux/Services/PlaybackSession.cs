@@ -109,7 +109,9 @@ namespace Silolux.Services
                 .With("subtitle_fidelity_preference", "compatible")
                 .With("client_capabilities", PlaybackCapabilities.ClientCapabilities())
                 .With("client_playback_context", PlaybackCapabilities.PlaybackContext());
-            if (startPosition > 0) body.With("start_position", startPosition);
+            // Always sent, 0 included: without it the server resumes from the saved position,
+            // which turned "Start from beginning" into another resume.
+            body.With("start_position", Math.Max(0, startPosition));
             if (pinFile) body.With("allow_alternate_versions", false);
             s.AddBandwidth(body);
 
