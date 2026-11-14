@@ -76,8 +76,8 @@ Store publishing needs a Partner Center app reservation. Replace `Identity`, `Pu
 - No seek re-anchor for server-anchored HLS timelines. Seeking works inside what the stream
   exposes.
 - A PIN profile's token is held in memory only, so a cold start returns to the profile picker.
-- Not tested on console hardware or against a live server yet.
+- Tested on Windows desktop against a local Docker Silo server; not yet on console hardware.
 
 ## License
 
-AGPL-3.0-or-later, matching Silo.
+MIT; see [LICENSE](LICENSE).
