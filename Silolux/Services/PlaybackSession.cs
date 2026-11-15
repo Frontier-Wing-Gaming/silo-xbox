@@ -186,6 +186,14 @@ namespace Silolux.Services
             }
         }
         public string SelectedSubtitleId => Plan.Path("selected_tracks/subtitle")?.Str("id");
+
+        /// <summary>
+        /// The server drew the chosen subtitle into the picture (subtitle mode burn_in; a transcode can,
+        /// such as one an automatic step-down switches to). Its sidecar must not be shown on top, and
+        /// another choice needs a new stream. Other modes (render, off, hls_rendition, embedded) leave
+        /// the picture clean.
+        /// </summary>
+        public bool SubtitleBurnedIn => Plan.Path("subtitle")?.Str("mode") == "burn_in";
         /// <summary>The file actually playing (a fallback can differ from the one requested).</summary>
         public string EffectiveFileId => Plan.Str("effective_media_file_id") ?? Plan.Str("requested_media_file_id");
 
@@ -250,8 +258,8 @@ namespace Silolux.Services
                 .With("subtitle_fidelity_preference", "compatible")
                 .With("client_capabilities", PlaybackCapabilities.ClientCapabilities())
                 .With("client_playback_context", PlaybackCapabilities.PlaybackContext());
-            // Omitted, the server resumes from its saved position. Sent (0 for "Play from start"), it's
-            // where playback begins: without the 0, "Play from start" became another resume.
+            // Sent, it's where playback begins (the title page sends the resume point it shows, or 0
+            // for "Play from start"). Omitted, the server decides, and not every server resumes.
             if (startPosition.HasValue) body.With("start_position", Math.Max(0, startPosition.Value));
             if (pinFile) body.With("allow_alternate_versions", false);
             s.AddBandwidth(body);
@@ -260,6 +268,8 @@ namespace Silolux.Services
             PlaybackLog.Write("start file " + fileId + ": asked " +
                               (startPosition.HasValue ? "start_position " + PlaybackLog.Secs(startPosition.Value) : "no start_position (server resumes)") +
                               "; plan starts at " + PlaybackLog.Secs(s.SourcePosition(s.PlayerStartSeconds)) + " via " + s.Delivery +
+                              ", " + (s.Plan.Path("effective_recipe")?.NumOrNull("bitrate_kbps") is double sent ? sent + " kbps" : "bitrate unknown") +
+                              " for a " + s.bandwidthKbps + " kbps estimate (" + BandwidthEstimator.LastSource + ")" +
                               ", session " + s.SessionId + ", profile " + AppSettings.ProfileId + ", server " + AppSettings.ServerUrl);
             await s.KeepSurroundAsync();
             return s;
@@ -349,6 +359,36 @@ namespace Silolux.Services
                 QualityPreference = previous;
                 throw;
             }
+        }
+
+        /// <summary>The bitrate this plan sends, or 0 when the plan doesn't say.</summary>
+        public int PlanKbps => (int)(Plan.Path("effective_recipe")?.NumOrNull("bitrate_kbps") ?? 0);
+
+        /// <summary>Whether the server takes observed throughput (it advertised buffering_quality_v1 and we declared it).</summary>
+        public bool ReportsRebuffering => features.Contains(BandwidthEstimator.Feature);
+
+        /// <summary>
+        /// Auto quality couldn't keep up: a quality_change replan that reports what the stream really
+        /// received (observed_rebuffer). The server plans with, and remembers for this device, the lower
+        /// of that and the estimate, so this and later starts get a stream the connection carries.
+        /// </summary>
+        public async Task StepDownAsync(int receivedKbps, int audioIndex, string subtitleTrackId, double playerSeconds)
+        {
+            var received = Math.Max(100, Math.Min(1000000, receivedKbps));
+            var before = PlanKbps;
+            var body = ReplanBody("quality_change", playerSeconds, Tracks(audioIndex, subtitleTrackId))
+                .With("bandwidth_estimate_kbps", bandwidthKbps > 0 ? bandwidthKbps : received)
+                .With("bandwidth_estimate_source", "observed_rebuffer")
+                .With("observed_throughput_kbps", received);
+            await ReplanAsync(body);
+            // Later replans (seeks, track changes) plan with what got through.
+            bandwidthKbps = received;
+            BandwidthEstimator.Observed(api, received);
+            PlaybackLog.Write("stepped down: " + before + " kbps stream received about " + received + " kbps; now " +
+                              PlanKbps + " kbps via " + Delivery + (ActiveQuality != null ? " (" + ActiveQuality + ")" : "") +
+                              "; subtitle " + (SelectedSubtitleId ?? "none") +
+                              (SelectedSubtitleId != null ? " (" + (Plan.Path("subtitle")?.Str("mode") ?? "?") + ")" : "") +
+                              (string.IsNullOrEmpty(subtitleTrackId) || subtitleTrackId == SelectedSubtitleId ? "" : ", asked for " + subtitleTrackId));
         }
 
         /// <summary>

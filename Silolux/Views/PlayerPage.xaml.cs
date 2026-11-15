@@ -240,6 +240,9 @@ namespace Silolux.Views
                 timer = new DispatcherTimer { Interval = ProgressEvery };
                 timer.Tick += async (s, _) => await ReportAsync();
                 timer.Start();
+                paceTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+                paceTimer.Tick += (s, _) => CheckPace();
+                paceTimer.Start();
             }
             catch (ApiException ex)
             {
@@ -274,11 +277,14 @@ namespace Silolux.Views
             // over and over while streaming it, and the picture and subtitles lagged.
             mediaSource = source;
             sidecarInfo.Clear();
-            pendingSubtitleId = selectedId;
+            // Already in the picture: its sidecar on top would show every line twice.
+            var burnedIn = selectedId != null && session.SubtitleBurnedIn;
+            if (burnedIn) subtitleNotes.Add("burned into the picture by the server");
+            pendingSubtitleId = burnedIn ? null : selectedId;
             foreach (var sub in session.SidecarSubtitles())
             {
                 if (sub.TrackId != null) sidecarInfo[sub.TrackId] = sub;
-                if (sub.TrackId != null && sub.TrackId == selectedId) await AttachSubtitleAsync(sub);
+                if (!burnedIn && sub.TrackId != null && sub.TrackId == selectedId) await AttachSubtitleAsync(sub);
             }
 
             // No start time on the item: MediaPlaybackItem(source, start) trims the item, and its clock,
@@ -384,6 +390,8 @@ namespace Silolux.Views
             {
                 if (matchFromPlayer) await MatchDisplayFromPlayerAsync();
                 StartAtPlanPosition();
+                // The first seconds of a new stream fill its buffer; judge the pace after them.
+                ResetPace(TimeSpan.FromSeconds(5));
                 Overlay.Visibility = Visibility.Collapsed;
                 Busy.IsActive = false;
                 recovering = false;
@@ -741,9 +749,28 @@ namespace Silolux.Views
             });
         }
 
+        DateTimeOffset? bufferingSince;
+
         async void PlaybackStateChanged(MediaPlaybackSession sender, object args)
         {
             var state = sender.PlaybackState;
+            // Every wait for data, how long it lasted and how much was downloaded, in playback-log.txt.
+            try
+            {
+                if (state == MediaPlaybackState.Buffering && bufferingSince == null)
+                {
+                    bufferingSince = DateTimeOffset.UtcNow;
+                }
+                else if (state != MediaPlaybackState.Buffering && bufferingSince is DateTimeOffset since)
+                {
+                    bufferingSince = null;
+                    PlaybackLog.Write(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                        "buffered {0:0.0} s at {1} (downloaded {2:0}% of the stream)",
+                        (DateTimeOffset.UtcNow - since).TotalSeconds, PlaybackLog.Secs(sender.Position.TotalSeconds),
+                        sender.DownloadProgress * 100));
+                }
+            }
+            catch (Exception) { }
             await Dispatcher.RunAsync(CoreDispatcherPriority.Normal, () => ShowStall(state == MediaPlaybackState.Buffering));
             // Report pause and resume right away rather than at the next tick.
             if (state == MediaPlaybackState.Paused || state == MediaPlaybackState.Playing)
@@ -774,12 +801,124 @@ namespace Silolux.Views
             var now = DateTimeOffset.UtcNow;
             stalls.Add(now);
             stalls.RemoveAll(t => now - t > TimeSpan.FromMinutes(2));
-            if (stalls.Count >= 3 && !stallHintShown && session != null && session.AvailableQualities().Any())
+            if (stalls.Count >= 3 && session != null)
             {
-                stallHintShown = true;
-                // The cached speed was too optimistic: measure again for the next title.
-                BandwidthEstimator.Forget();
-                ShowHint((Ui.Tv ? "☰" : "T") + "  Buffering? Choose a lower quality", 8000);
+                stalls.Clear();
+                // Three stalls in two minutes: the stream evidently doesn't fit, whatever the pace says.
+                var pace = Pace(TimeSpan.FromSeconds(8));
+                TryStepDown(Math.Min(pace ?? 0.8, 0.8), "3 stalls in 2 minutes");
+            }
+        }
+
+        // ---- Pace: a stream the connection can't carry doesn't always stall. Media Foundation can
+        // stay "playing" and creep along as data trickles in (1 s of film per 10 s on a 12 Mbps
+        // original over a ~1 Mbps link), so compare the film's advance with the clock as well.
+        DispatcherTimer paceTimer;
+        readonly List<KeyValuePair<DateTimeOffset, double>> paceSamples = new List<KeyValuePair<DateTimeOffset, double>>();
+        DateTimeOffset paceFrom;
+        int stepDowns;
+        bool steppingDown;
+        const int MaxStepDowns = 3;
+        const double SlowPace = 0.7;
+        static readonly TimeSpan PaceWindow = TimeSpan.FromSeconds(20);
+
+        void ResetPace(TimeSpan wait)
+        {
+            paceSamples.Clear();
+            paceFrom = DateTimeOffset.UtcNow + wait;
+        }
+
+        void CheckPace()
+        {
+            if (session == null || player == null || leaving || recovering || steppingDown || Overlay.Visibility == Visibility.Visible)
+            {
+                paceSamples.Clear();
+                return;
+            }
+            var now = DateTimeOffset.UtcNow;
+            if (now < paceFrom) return;
+            MediaPlaybackState state;
+            double position;
+            try
+            {
+                state = player.PlaybackSession.PlaybackState;
+                position = player.PlaybackSession.Position.TotalSeconds;
+            }
+            catch (Exception) { return; }
+            // Paused or opening: nothing to judge. Buffering counts: the clock runs, the film doesn't.
+            if (state != MediaPlaybackState.Playing && state != MediaPlaybackState.Buffering)
+            {
+                paceSamples.Clear();
+                return;
+            }
+            if (paceSamples.Count > 0)
+            {
+                var last = paceSamples[paceSamples.Count - 1];
+                var moved = position - last.Value;
+                // A seek, not playback.
+                if (moved < -1 || moved > (now - last.Key).TotalSeconds + 3) paceSamples.Clear();
+            }
+            paceSamples.Add(new KeyValuePair<DateTimeOffset, double>(now, position));
+            paceSamples.RemoveAll(p => now - p.Key > PaceWindow + TimeSpan.FromSeconds(4));
+
+            var pace = Pace(PaceWindow);
+            if (pace.HasValue && pace.Value < SlowPace)
+            {
+                paceSamples.Clear();
+                TryStepDown(pace.Value, string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "the film advanced {0:0}% as fast as the clock over {1:0} s", pace.Value * 100, PaceWindow.TotalSeconds));
+            }
+        }
+
+        /// <summary>Film seconds per clock second over at least <paramref name="span"/>, or null without enough samples.</summary>
+        double? Pace(TimeSpan span)
+        {
+            if (paceSamples.Count < 2) return null;
+            var newest = paceSamples[paceSamples.Count - 1];
+            var oldest = paceSamples[0];
+            var seconds = (newest.Key - oldest.Key).TotalSeconds;
+            if (seconds < span.TotalSeconds) return null;
+            return Math.Max(0, newest.Value - oldest.Value) / seconds;
+        }
+
+        /// <summary>
+        /// Auto quality on a stream that can't keep up: replan with what it actually received. A
+        /// quality the viewer picked stays theirs (they get the hint); so does a title with nothing lower.
+        /// </summary>
+        async void TryStepDown(double pace, string why)
+        {
+            if (steppingDown || recovering || leaving || session == null) return;
+            var plan = session.PlanKbps;
+            var received = (int)(plan * Math.Max(0.05, pace));
+            string cant = null;
+            if (session.QualityPreference != "auto") cant = "quality " + session.QualityPreference + " was picked by hand";
+            else if (!session.ReportsRebuffering) cant = "the server doesn't take observed throughput";
+            else if (plan <= 0) cant = "the plan doesn't give its bitrate";
+            else if (stepDowns >= MaxStepDowns) cant = "already stepped down " + stepDowns + " times";
+            else if (!session.AvailableQualities().Any(q => q.Kbps > 0 && q.Kbps < plan)) cant = "nothing lower is offered";
+            PlaybackLog.Write("slow playback (" + why + "; about " + received + " of " + plan + " kbps arriving) -> " +
+                              (cant == null ? "stepping down" : "staying: " + cant));
+            if (cant != null)
+            {
+                if (!stallHintShown && session.AvailableQualities().Any())
+                {
+                    stallHintShown = true;
+                    // The cached speed was too optimistic: measure again for the next title.
+                    BandwidthEstimator.Forget();
+                    ShowHint((Ui.Tv ? "☰" : "T") + "  Buffering? Choose a lower quality", 8000);
+                }
+                return;
+            }
+            steppingDown = true;
+            stepDowns++;
+            try
+            {
+                await ReloadAsync(p => session.StepDownAsync(received, session.SelectedAudioIndex ?? 0, currentSubtitleId, p),
+                    "Your connection can't keep up with this stream.\nSwitching to a lower quality\u2026", keepPlayingOnFailure: true);
+            }
+            finally
+            {
+                steppingDown = false;
             }
         }
 
@@ -921,6 +1060,9 @@ namespace Silolux.Views
                     await ReloadAsync(p => session.ChangeQualityAsync(pickedQuality, audioIndex, pickedSub, p), "Switching quality…");
                 else if (audioIndex != currentAudio)
                     await ReloadAsync(p => session.ChangeTracksAsync(audioIndex, pickedSub, p), "Switching audio…");
+                else if (pickedSub != currentSubtitleId && session.SubtitleBurnedIn)
+                    // The current one is part of the picture: only a new stream removes or replaces it.
+                    await ReloadAsync(p => session.ChangeTracksAsync(audioIndex, pickedSub, p), "Switching subtitles\u2026");
                 else if (pickedSub != currentSubtitleId)
                     ShowSubtitle(pickedSub);
             }
@@ -993,7 +1135,9 @@ namespace Silolux.Views
         /// Audio and quality changes need a new stream: ask the server for a plan at the current
         /// position (<paramref name="replan"/> gets it), then load that plan.
         /// </summary>
-        async Task ReloadAsync(Func<double, Task> replan, string message)
+        /// <param name="keepPlayingOnFailure">For changes the app makes itself: if the server refuses, carry on
+        /// with the current stream rather than stop with the error.</param>
+        async Task ReloadAsync(Func<double, Task> replan, string message, bool keepPlayingOnFailure = false)
         {
             var position = CurrentPosition();
             recovering = true;
@@ -1006,6 +1150,14 @@ namespace Silolux.Views
                 await replan(position);
                 stalls.Clear();
                 await LoadPlanAsync();
+            }
+            catch (ApiException ex) when (keepPlayingOnFailure)
+            {
+                PlaybackLog.Write("replan refused, keeping the current stream: " + ex.Status + " " + ex.Code + ": " + ex.Message);
+                recovering = false;
+                Overlay.Visibility = Visibility.Collapsed;
+                Busy.IsActive = false;
+                ResetPace(TimeSpan.FromSeconds(30));
             }
             catch (ApiException ex)
             {
@@ -1036,6 +1188,7 @@ namespace Silolux.Views
                 await WritePlaybackReportAsync();
             leaving = true;
             timer?.Stop();
+            paceTimer?.Stop();
             if (controlPanelStates != null) controlPanelStates.CurrentStateChanged -= ControlPanelStateChanged;
             RestorePointer();
             var position = CurrentPosition();

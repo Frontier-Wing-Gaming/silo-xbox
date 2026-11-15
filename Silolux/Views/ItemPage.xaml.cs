@@ -17,9 +17,10 @@ namespace Silolux.Views
         public string FileId;
         public bool PinFile;
         /// <summary>
-        /// Where to start, or null to resume: the server then uses its own saved position. A
-        /// position read on this page can be stale (the last stop may still be on its way), so
-        /// resumes leave it to the server; only "Play from start" sends one (0).
+        /// Where to start: the resume point this page shows (read after the last stop reached the
+        /// server; see OnNavigatedTo), or 0. Null leaves it to the server, which resumes from its
+        /// saved position on some servers and starts over on others (silo.pfsystems.ac started a
+        /// resume at 0:00 three seconds after saving 38:54).
         /// </summary>
         public double? StartPosition;
         public string Title;
@@ -57,7 +58,7 @@ namespace Silolux.Views
                 if (IsSeries && resume == null && Episodes.Items.Count > 0)
                 {
                     var first = (Episode)Episodes.Items[0];
-                    resume = new PlayArgs { ContentId = first.ContentId, FileId = first.FileId, Title = Display(first.Heading) };
+                    resume = new PlayArgs { ContentId = first.ContentId, FileId = first.FileId, StartPosition = ResumeFrom(first.Position), Title = Display(first.Heading) };
                     PlayButton.Content = "Play";
                     Actions.Visibility = Visibility.Visible;
                     RestartButton.Visibility = Visibility.Collapsed;
@@ -131,7 +132,7 @@ namespace Silolux.Views
             var title = item.Str("type") == "episode" && item.Str("series_title") != null
                 ? item.Str("series_title") + " · " + item.Str("title")
                 : item.Str("title");
-            resume = new PlayArgs { ContentId = item.Str("content_id"), FileId = file.Str("file_id"), StartPosition = null, Title = title };
+            resume = new PlayArgs { ContentId = item.Str("content_id"), FileId = file.Str("file_id"), StartPosition = ResumeFrom(pos), Title = title };
             PlayButton.Content = pos > 30 ? "Resume from " + TimeSpan.FromSeconds(pos).ToString(pos >= 3600 ? @"h\:mm\:ss" : @"m\:ss") : "Play";
             RestartButton.Visibility = pos > 30 ? Visibility.Visible : Visibility.Collapsed;
         }
@@ -177,7 +178,7 @@ namespace Silolux.Views
             {
                 ContentId = ep.ContentId,
                 FileId = ep.FileId,
-                StartPosition = ep.Played ? 0 : (double?)null,
+                StartPosition = ep.Played ? 0 : ResumeFrom(ep.Position),
                 Title = Display(ep.Heading),
             });
         }
@@ -194,7 +195,7 @@ namespace Silolux.Views
                     var v = ep.Objects("versions").FirstOrDefault();
                     if (v == null) { Error.Text = "This episode has no playable file."; return; }
                     var title = (ep.Str("series_title") ?? item.Str("title")) + " · " + ep.Str("title");
-                    Play(new PlayArgs { ContentId = resume.ContentId, FileId = v.Str("file_id"), StartPosition = null, Title = title });
+                    Play(new PlayArgs { ContentId = resume.ContentId, FileId = v.Str("file_id"), StartPosition = ResumeFrom(ep.ResumeSeconds()), Title = title });
                 }
                 catch (ApiException ex)
                 {
@@ -212,5 +213,8 @@ namespace Silolux.Views
         }
 
         void Play(PlayArgs args) => Frame.Navigate(typeof(PlayerPage), args);
+
+        /// <summary>Where "Resume" starts: the saved position, as the button shows it (over 30 s), else the start.</summary>
+        static double ResumeFrom(double saved) => saved > 30 ? saved : 0;
     }
 }

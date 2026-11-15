@@ -4,7 +4,7 @@ A native Xbox (UWP, C#/XAML) client for [Silo](https://github.com/Silo-Server/si
 sign-in, profiles, home rows, movie and series pages, and playback through Media Foundation, all
 on Silo's native `/api/v2` and playback protocol v3. It also runs on Windows desktops.
 
-Status: early prototype, `0.2.1`.
+Status: early prototype, `0.2.3`.
 
 Silolux is an independent project by Frontier Wing Gaming. It is not made, endorsed or supported
 by Silo Media L.L.C.; "Silo" is their trademark and is used here only to say what this app connects to.
@@ -22,7 +22,7 @@ by Silo Media L.L.C.; "Silo" is their trademark and is used here only to say wha
 | Subtitles | Sidecar text subtitles load as `TimedTextSource`, only the chosen track at start and the others when picked. ASS/SSA tracks are fetched as WebVTT (the server converts by extension), since the console can't draw ASS styling anyway. On a stream the server started mid-film, the app shifts cue times to the stream's clock. |
 | Seeking | D-pad left/right while the controls are hidden, or LB/RB at any time, skip 10 s back or 30 s forward, with the film's time in a strip at the top; the player's seek bar works as usual too. Media Foundation ignores a start time for HLS, so the app seeks to the plan's start once the stream opens. A server remux (`can_seek_anywhere` false) has no length the player can seek in: there the app hides the seek bar and skip buttons, and each run of skips becomes one `seek_reanchor` replan. |
 | Display | On Xbox the TV switches to a refresh rate that fits the film (24 Hz for 23.976/24 fps, 50 Hz for 25 fps; needs *Allow 24 Hz* in the console's video modes) and to HDR10 for HDR video, then back on exit. |
-| Quality | Away from the local network a short speed test is sent as `bandwidth_estimate_kbps`, so *auto* quality fits the connection. The player menu also lists the server's fixed quality rungs. |
+| Quality | Away from the local network a short speed test is sent as `bandwidth_estimate_kbps`, so *auto* quality fits the connection. If the stream still can't keep up (three stalls in two minutes, or the film advancing under 70% as fast as the clock over 20 s), *auto* steps down: a `quality_change` replan reporting what actually arrived (`observed_rebuffer`), up to three times per playback. That speed is reused for 10 minutes, and for a day a stored speed test far above it is measured again. The player menu also lists the server's fixed quality rungs; a rung picked there is never changed automatically. |
 | Audio | When the server's progressive route would downmix 5.1+ audio the console can't decode (DTS, TrueHD) to stereo, and the console's audio output has more than two channels, the app asks for the HLS route, which keeps 5.1. |
 | Capabilities | Decoders are probed with `CodecQuery` (H.264, HEVC, VP9, AV1, MPEG-2, VC-1; AAC, MP3, AC-3, E-AC-3, FLAC, ALAC, Opus). HDR10 is reported only when the console offers the app an HDR (SMPTE 2084) display mode. No passthrough or Dolby Vision claims. |
 | Diagnostics | *Diagnostics* on the home header lists decoders, display modes, TV colour, audio output and network next to what the app reports to the server, plus the last playback (delivery, recipe, decoded size, display match). Saved as `LocalState\diagnostics.txt` and `playback.txt`. |
